@@ -52,7 +52,6 @@ fn draw_empty(frame: &mut Frame, area: Rect) {
         Paragraph::new("type / to search")
             .style(theme::dimmed())
             .alignment(Alignment::Center),
-        // vertically centre the hint
         Rect {
             y: inner.y + inner.height / 2,
             height: 1,

@@ -1,7 +1,11 @@
 mod actor;
 mod source;
 
-use crate::{client::Backend, messages::{PlayerCommand, PlayerState}, CoreError, Result};
+use crate::{
+    client::Backend,
+    error::{CoreError, Result},
+    messages::{PlayerCommand, PlayerState},
+};
 
 pub struct PlayerHandle {
     cmd_tx: tokio::sync::mpsc::Sender<PlayerCommand>,

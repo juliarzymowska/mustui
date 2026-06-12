@@ -3,12 +3,18 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Duration, interval};
-use ytm_core::{
-    Backend, DataMessage, LoopMode, PlayerCommand, PlayerHandle, PlayerState, SearchResults,
-    TrackId,
-};
 
-use crate::{action::Action, events, ui};
+use crate::{
+    action::Action,
+    artwork,
+    client::Backend,
+    events,
+    messages::{DataMessage, LoopMode, PlayerCommand, PlayerState},
+    models::{SearchResults, TrackId},
+    player::PlayerHandle,
+    playlist::PlaylistStore,
+    ui,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
@@ -26,13 +32,19 @@ pub struct App {
     pub player_state: PlayerState,
     pub artwork: Option<StatefulProtocol>,
     pub picker: Option<Picker>,
+    pub playlist_store: PlaylistStore,
     pub should_quit: bool,
     data_tx: mpsc::Sender<DataMessage>,
     data_rx: mpsc::Receiver<DataMessage>,
 }
 
 impl App {
-    pub fn new(backend: Backend, player: PlayerHandle, picker: Option<Picker>) -> Self {
+    pub fn new(
+        backend: Backend,
+        player: PlayerHandle,
+        picker: Option<Picker>,
+        playlist_store: PlaylistStore,
+    ) -> Self {
         let (data_tx, data_rx) = mpsc::channel(64);
         Self {
             backend,
@@ -44,6 +56,7 @@ impl App {
             player_state: PlayerState::default(),
             artwork: None,
             picker,
+            playlist_store,
             should_quit: false,
             data_tx,
             data_rx,
@@ -186,7 +199,7 @@ fn spawn_artwork_fetch(
     tx: mpsc::Sender<DataMessage>,
 ) {
     tokio::spawn(async move {
-        let result = ytm_core::fetch_artwork(&backend, &url).await;
+        let result = artwork::fetch_artwork(&backend, &url).await;
         let msg = match result {
             Ok(img) => DataMessage::ArtworkReady {
                 track_id,

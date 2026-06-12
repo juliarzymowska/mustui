@@ -7,12 +7,14 @@ use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::{
+    error::{CoreError, Result},
     models::{SearchResults, ThumbnailUrl, Track, TrackId},
-    CoreError, Result,
 };
 
 pub(crate) async fn search(query: &str, limit: u32) -> Result<SearchResults> {
-    let search_spec = format!("ytsearch{limit}:{query}");
+    // Fetch 2× candidates so we have room to filter and re-rank.
+    let fetch = limit * 2;
+    let search_spec = format!("ytsearch{fetch}:{query}");
     let output = Command::new("yt-dlp")
         .args([
             "--dump-json",
@@ -38,15 +40,93 @@ pub(crate) async fn search(query: &str, limit: u32) -> Result<SearchResults> {
     let stdout = std::str::from_utf8(&output.stdout)
         .map_err(|e| CoreError::YtDlpFailed(format!("non-utf8 stdout: {e}")))?;
 
-    let mut tracks = Vec::with_capacity(limit as usize);
+    let mut entries: Vec<(i32, FlatEntry)> = Vec::with_capacity(fetch as usize);
     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
         match serde_json::from_str::<FlatEntry>(line) {
-            Ok(entry) => tracks.push(entry.into_track()),
+            Ok(entry) => {
+                let score = audio_score(&entry);
+                entries.push((score, entry));
+            }
             Err(e) => warn!(error = %e, "skipping malformed yt-dlp entry"),
         }
     }
 
+    // Stable sort: higher score first, preserving YouTube's relevance order for ties.
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let tracks = entries
+        .into_iter()
+        .take(limit as usize)
+        .map(|(_, e)| e.into_track())
+        .collect();
+
     Ok(SearchResults { query: query.to_owned(), tracks })
+}
+
+/// Score a search result toward official album audio and away from videos/live/covers.
+/// Higher = more likely to be a clean studio recording.
+fn audio_score(e: &FlatEntry) -> i32 {
+    let mut score = 0i32;
+    let t = e.title.to_lowercase();
+
+    // ── Positive signals ──────────────────────────────────────────────────
+    // YouTube Music "Topic" channels auto-upload official album audio.
+    let channel = e.channel.as_deref().or(e.uploader.as_deref()).unwrap_or("");
+    if channel.ends_with("- Topic") {
+        score += 12;
+    }
+    // Explicit "official audio" tag in title.
+    if t.contains("official audio") || t.contains("audio only") {
+        score += 8;
+    }
+    // "Provided to YouTube" watermark — distribution from a label/artist.
+    if t.contains("provided to youtube") {
+        score += 6;
+    }
+    // Album metadata present (rare in flat-playlist but worth rewarding).
+    if e.album.is_some() {
+        score += 6;
+    }
+
+    // ── Negative signals ──────────────────────────────────────────────────
+    // Music videos (have a video component we don't want).
+    if t.contains("official video")
+        || t.contains("official music video")
+        || t.contains("(mv)")
+        || t.contains("music video")
+    {
+        score -= 8;
+    }
+    // Lyric videos — lower-fidelity experience.
+    if t.contains("lyric video") || t.contains("(lyrics)") || t.ends_with(" lyrics") {
+        score -= 5;
+    }
+    // Live recordings — different mix, crowd noise.
+    if t.contains("(live)") || t.contains("live at ") || t.contains("live from ")
+        || t.contains("live performance") || t.contains("live version")
+    {
+        score -= 7;
+    }
+    // Covers and fan recordings.
+    if t.contains("(cover)") || t.contains("cover version") || t.contains("fan cover") {
+        score -= 6;
+    }
+    // Karaoke / instrumental — wrong content entirely.
+    if t.contains("karaoke") || t.contains("instrumental") || t.contains("backing track") {
+        score -= 10;
+    }
+    // Remixes — valid but lower priority than originals.
+    if t.contains("remix") || t.contains("re-mix") {
+        score -= 3;
+    }
+    // Duration sanity: a typical song is 1:30–10:00.
+    if let Some(dur) = e.duration {
+        if dur < 90.0 || dur > 600.0 {
+            score -= 4;
+        }
+    }
+
+    score
 }
 
 pub(crate) async fn ensure_local_audio(music_dir: &Path, id: &TrackId) -> Result<PathBuf> {

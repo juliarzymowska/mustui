@@ -3,9 +3,8 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Borders, Gauge, Paragraph},
 };
-use ytm_core::{LoopMode, PlaybackStatus};
 
-use crate::{app::App, ui::theme};
+use crate::{app::App, messages::{LoopMode, PlaybackStatus}, ui::theme};
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::new().borders(Borders::ALL).title(" Now Playing ");

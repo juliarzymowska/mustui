@@ -9,7 +9,7 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub async fn new() -> crate::Result<Self> {
+    pub async fn new() -> crate::error::Result<Self> {
         let music_dir = UserDirs::new()
             .and_then(|d| d.audio_dir().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| {

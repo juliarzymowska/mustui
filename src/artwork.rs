@@ -1,6 +1,6 @@
 use image::DynamicImage;
 
-use crate::{Backend, Result};
+use crate::{client::Backend, error::Result};
 
 pub async fn fetch_artwork(backend: &Backend, url: &str) -> Result<DynamicImage> {
     let bytes = backend

@@ -15,4 +15,3 @@ pub fn dimmed() -> Style {
 pub fn reversed() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
 }
-
