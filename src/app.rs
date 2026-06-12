@@ -2,12 +2,11 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui_image::picker::Picker;
 
 use crate::{
     audio::Audio,
     client::Backend,
-    model::{InputMode, Model},
+    model::{Model, SearchFocus, View},
     msg::Message,
     playlist::PlaylistStore,
     task::Task,
@@ -21,7 +20,6 @@ pub struct App {
     backend: Backend,
     task: Task<Message>,
     task_rx: mpsc::Receiver<Message>,
-    picker: Option<Picker>,
     pub playlist_store: PlaylistStore,
 }
 
@@ -29,7 +27,6 @@ impl App {
     pub fn new(
         backend: Backend,
         audio: Audio,
-        picker: Option<Picker>,
         playlist_store: PlaylistStore,
     ) -> Self {
         let (task_tx, task_rx) = mpsc::channel();
@@ -39,23 +36,29 @@ impl App {
             backend,
             task: Task::new(task_tx),
             task_rx,
-            picker,
             playlist_store,
         }
     }
 
     pub fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
+        let mut playlists = self.playlist_store.load_all();
+        let downloads = crate::library::load_downloads(&self.backend.music_dir);
+        if !downloads.tracks.is_empty() {
+            playlists.insert(0, downloads);
+        }
+        self.model.playlists = playlists;
+
         let tick_rate = Duration::from_millis(40);
         let mut last_tick = Instant::now();
 
         while !self.model.should_quit {
-            terminal.draw(|f| ui::draw(f, &self.model))?;
+            terminal.draw(|f| ui::draw(f, &mut self.model))?;
 
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
                 if let event::Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
-                        let msg = translate_key(key, &self.model.mode);
+                        let msg = translate_key(key, &self.model);
                         self.dispatch(msg);
                     }
                 }
@@ -75,34 +78,74 @@ impl App {
     }
 
     fn dispatch(&mut self, msg: Message) {
-        let mut next = update(&mut self.model, msg, &mut self.audio, &self.backend, &self.task, &self.picker);
+        let mut next = update(
+            &mut self.model,
+            msg,
+            &mut self.audio,
+            &self.backend,
+            &self.task,
+        );
         while !matches!(next, Message::None) {
-            next = update(&mut self.model, next, &mut self.audio, &self.backend, &self.task, &self.picker);
+            next = update(
+                &mut self.model,
+                next,
+                &mut self.audio,
+                &self.backend,
+                &self.task,
+            );
         }
     }
 }
 
-fn translate_key(key: event::KeyEvent, mode: &InputMode) -> Message {
+fn translate_key(key: event::KeyEvent, model: &Model) -> Message {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Message::Quit;
     }
-    match mode {
-        InputMode::Normal => match key.code {
-            KeyCode::Char('q') => Message::Quit,
-            KeyCode::Char('/') => Message::EnterSearch,
-            KeyCode::Char(' ') => Message::TogglePause,
-            KeyCode::Char('l') => Message::ToggleLoop,
-            KeyCode::Char('j') | KeyCode::Down => Message::SelectNext,
-            KeyCode::Char('k') | KeyCode::Up => Message::SelectPrev,
-            KeyCode::Enter => Message::PlaySelected,
-            _ => Message::None,
-        },
-        InputMode::Searching => match key.code {
-            KeyCode::Esc => Message::CancelSearch,
+    match model.view {
+        View::Search => translate_search(key, &model.search_focus),
+        View::Player => translate_player(key),
+    }
+}
+
+fn translate_search(key: event::KeyEvent, focus: &SearchFocus) -> Message {
+    match focus {
+        SearchFocus::Input => match key.code {
+            KeyCode::Esc => Message::Back,
             KeyCode::Enter => Message::SubmitSearch,
             KeyCode::Backspace => Message::SearchBackspace,
             KeyCode::Char(c) => Message::SearchChar(c),
+            KeyCode::Tab => Message::ToggleView,
             _ => Message::None,
         },
+        SearchFocus::Results => match key.code {
+            KeyCode::Char('/') | KeyCode::Esc => Message::EnterSearch,
+            KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
+            KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
+            KeyCode::Enter => Message::Confirm,
+            KeyCode::Tab => Message::ToggleView,
+            KeyCode::Char('q') => Message::Quit,
+            _ => Message::None,
+        },
+    }
+}
+
+fn translate_player(key: event::KeyEvent) -> Message {
+    match key.code {
+        KeyCode::Char(' ') => Message::TogglePause,
+        KeyCode::Char('r') => Message::ToggleLoop,
+        KeyCode::Tab => Message::ToggleView,
+        KeyCode::Char('q') => Message::Quit,
+
+        KeyCode::Char('h') | KeyCode::Left => Message::FocusLeft,
+        KeyCode::Char('l') | KeyCode::Right => Message::FocusRight,
+        KeyCode::Char('H') => Message::SkipPrev,
+        KeyCode::Char('L') => Message::SkipNext,
+
+        KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
+        KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
+        KeyCode::Enter => Message::Confirm,
+        KeyCode::Esc => Message::Back,
+
+        _ => Message::None,
     }
 }

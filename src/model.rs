@@ -1,15 +1,32 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use ratatui_image::protocol::StatefulProtocol;
-
-use crate::models::{SearchResults, Track};
+use crate::{
+    models::{SearchResults, Track, TrackId},
+    playlist::Playlist,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum InputMode {
+pub enum View {
+    Search,
     #[default]
-    Normal,
-    Searching,
+    Player,
+}
+
+/// Focus within the Search view.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SearchFocus {
+    #[default]
+    Input,
+    Results,
+}
+
+/// Focus within the Player view.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PlayerFocus {
+    #[default]
+    Playlists,
+    Songs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -17,6 +34,7 @@ pub enum LoopMode {
     #[default]
     Off,
     One,
+    Playlist,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -33,6 +51,7 @@ pub struct PlaybackState {
     pub status: AudioStatus,
     pub current: Option<Track>,
     pub current_path: Option<PathBuf>,
+    pub pending_id: Option<TrackId>,
     pub position: Duration,
     pub loop_mode: LoopMode,
     pub error: Option<String>,
@@ -40,11 +59,22 @@ pub struct PlaybackState {
 
 #[derive(Default)]
 pub struct Model {
-    pub mode: InputMode,
+    pub view: View,
+
+    // ── Search view ─────────────────────────────
+    pub search_focus: SearchFocus,
     pub query: String,
     pub results: SearchResults,
-    pub selected: usize,
+    pub results_selected: usize,
+
+    // ── Player view ─────────────────────────────
+    pub player_focus: PlayerFocus,
+    pub playlists: Vec<Playlist>,
+    pub playlist_selected: usize,
+    pub playlist_track_selected: usize,
+    pub queue: Vec<Track>,
+
+    // ── Shared ──────────────────────────────────
     pub playback: PlaybackState,
-    pub artwork: Option<StatefulProtocol>,
     pub should_quit: bool,
 }

@@ -1,11 +1,7 @@
-use std::sync::Arc;
-
-use ratatui_image::picker::Picker;
-
 use crate::{
     audio::Audio,
     client::Backend,
-    model::{AudioStatus, InputMode, LoopMode, Model},
+    model::{AudioStatus, LoopMode, Model, PlayerFocus, SearchFocus, View},
     msg::Message,
     task::Task,
 };
@@ -16,51 +12,139 @@ pub fn update(
     audio: &mut Audio,
     backend: &Backend,
     task: &Task<Message>,
-    picker: &Option<Picker>,
 ) -> Message {
     match msg {
         Message::None => Message::None,
 
+        // ── Tick: advance playback state ────────────────────────────────────
         Message::Tick => {
             let ended = audio.tick();
             model.playback.status = audio.status;
             model.playback.position = audio.position;
             if ended {
-                if model.playback.loop_mode == LoopMode::One {
-                    if let Some(path) = model.playback.current_path.clone() {
-                        match audio.play(&path) {
-                            Ok(()) => model.playback.status = AudioStatus::Playing,
-                            Err(e) => model.playback.error = Some(e.to_string()),
+                match model.playback.loop_mode {
+                    LoopMode::One => {
+                        if let Some(path) = model.playback.current_path.clone() {
+                            match audio.play(&path) {
+                                Ok(()) => model.playback.status = AudioStatus::Playing,
+                                Err(e) => model.playback.error = Some(e.to_string()),
+                            }
                         }
                     }
+                    LoopMode::Off | LoopMode::Playlist => return Message::PlayNext,
                 }
             }
             Message::None
         }
 
+        // ── Auto-advance / user skip ────────────────────────────────────────
+        Message::PlayNext => {
+            let next_idx = model
+                .queue
+                .iter()
+                .position(|t| Some(&t.id) == model.playback.current.as_ref().map(|c| &c.id))
+                .map_or(0, |i| i + 1);
+            if next_idx < model.queue.len() {
+                let track = model.queue[next_idx].clone();
+                start_playing(model, track, backend, task);
+            } else if model.playback.loop_mode == LoopMode::Playlist && !model.queue.is_empty() {
+                let track = model.queue[0].clone();
+                start_playing(model, track, backend, task);
+            } else {
+                model.playback.status = AudioStatus::Idle;
+                model.playback.current = None;
+            }
+            Message::None
+        }
+
+        Message::SkipNext => {
+            if model.queue.is_empty() {
+                return Message::None;
+            }
+            let next_idx = model
+                .queue
+                .iter()
+                .position(|t| Some(&t.id) == model.playback.current.as_ref().map(|c| &c.id))
+                .map_or(0, |i| (i + 1) % model.queue.len());
+            let track = model.queue[next_idx].clone();
+            start_playing(model, track, backend, task);
+            Message::None
+        }
+
+        Message::SkipPrev => {
+            if model.queue.is_empty() {
+                return Message::None;
+            }
+            let prev_idx = model
+                .queue
+                .iter()
+                .position(|t| Some(&t.id) == model.playback.current.as_ref().map(|c| &c.id))
+                .map(|i| if i == 0 { model.queue.len() - 1 } else { i - 1 })
+                .unwrap_or(0);
+            let track = model.queue[prev_idx].clone();
+            start_playing(model, track, backend, task);
+            Message::None
+        }
+
+        // ── Global ──────────────────────────────────────────────────────────
         Message::Quit => {
             model.should_quit = true;
             Message::None
         }
+        Message::ToggleView => {
+            model.view = match model.view {
+                View::Search => View::Player,
+                View::Player => View::Search,
+            };
+            Message::None
+        }
+        Message::TogglePause => {
+            audio.toggle_pause();
+            model.playback.status = audio.status;
+            Message::None
+        }
+        Message::ToggleLoop => {
+            model.playback.loop_mode = match model.playback.loop_mode {
+                LoopMode::Off => LoopMode::One,
+                LoopMode::One => LoopMode::Playlist,
+                LoopMode::Playlist => LoopMode::Off,
+            };
+            Message::None
+        }
 
-        Message::EnterSearch => {
-            model.mode = InputMode::Searching;
-            model.query.clear();
+        // ── Navigations routed by view/focus ─────────────────────────────
+        Message::NavUp => {
+            nav_prev(model);
             Message::None
         }
-        Message::CancelSearch => {
-            model.mode = InputMode::Normal;
+        Message::NavDown => {
+            nav_next(model);
             Message::None
         }
-        Message::SubmitSearch => {
-            model.mode = InputMode::Normal;
-            if !model.query.is_empty() {
-                let query = model.query.clone();
-                task.spawn(async move {
-                    let result = crate::ytdlp::search(&query, 10);
-                    Message::SearchDone(result.map_err(|e| e.to_string()))
-                });
+        Message::FocusLeft => {
+            if model.view == View::Player {
+                model.player_focus = PlayerFocus::Playlists;
             }
+            Message::None
+        }
+        Message::FocusRight => {
+            if model.view == View::Player {
+                model.player_focus = PlayerFocus::Songs;
+            }
+            Message::None
+        }
+        Message::Confirm => {
+            handle_confirm(model, backend, task);
+            Message::None
+        }
+        Message::Back => {
+            handle_back(model);
+            Message::None
+        }
+
+        // ── Search view ──────────────────────────────────────────────────
+        Message::EnterSearch => {
+            model.search_focus = SearchFocus::Input;
             Message::None
         }
         Message::SearchChar(c) => {
@@ -71,87 +155,22 @@ pub fn update(
             model.query.pop();
             Message::None
         }
-
-        Message::SelectNext => {
-            if model.selected + 1 < model.results.tracks.len() {
-                model.selected += 1;
-            }
-            Message::None
-        }
-        Message::SelectPrev => {
-            model.selected = model.selected.saturating_sub(1);
-            Message::None
-        }
-
-        Message::PlaySelected => {
-            if let Some(track) = model.results.tracks.get(model.selected).cloned() {
-                model.playback.status = AudioStatus::Loading;
-                model.playback.current = Some(track.clone());
-                model.playback.current_path = None;
-                model.playback.error = None;
-                model.artwork = None;
-
-                let music_dir = backend.music_dir.clone();
-                let track_id = track.id.clone();
+        Message::SubmitSearch => {
+            model.search_focus = SearchFocus::Results;
+            if !model.query.is_empty() {
+                let query = model.query.clone();
                 task.spawn(async move {
-                    let result = crate::ytdlp::ensure_local_audio(&music_dir, &track_id);
-                    match result {
-                        Ok(path) => Message::DownloadReady(track_id, path),
-                        Err(e) => Message::DownloadFailed(track_id, e.to_string()),
-                    }
+                    let result = crate::ytdlp::search(&query, 10);
+                    Message::SearchDone(result.map_err(|e| e.to_string()))
                 });
-
-                if let Some(thumb) = &track.thumbnail {
-                    let b = backend.clone();
-                    let tid = track.id.clone();
-                    let url = thumb.url.clone();
-                    task.spawn(async move {
-                        match crate::artwork::fetch_artwork(&b, &url).await {
-                            Ok(img) => Message::ArtworkReady(tid, Arc::new(img)),
-                            Err(_) => Message::ArtworkFailed(tid),
-                        }
-                    });
-                }
             }
             Message::None
         }
 
-        Message::DownloadReady(_, path) => {
-            model.playback.current_path = Some(path.clone());
-            match audio.play(&path) {
-                Ok(()) => {
-                    model.playback.status = AudioStatus::Playing;
-                    model.playback.error = None;
-                }
-                Err(e) => {
-                    model.playback.status = AudioStatus::Idle;
-                    model.playback.error = Some(e.to_string());
-                }
-            }
-            Message::None
-        }
-        Message::DownloadFailed(_, err) => {
-            model.playback.status = AudioStatus::Idle;
-            model.playback.error = Some(err);
-            Message::None
-        }
-
-        Message::TogglePause => {
-            audio.toggle_pause();
-            model.playback.status = audio.status;
-            Message::None
-        }
-        Message::ToggleLoop => {
-            model.playback.loop_mode = match model.playback.loop_mode {
-                LoopMode::Off => LoopMode::One,
-                LoopMode::One => LoopMode::Off,
-            };
-            Message::None
-        }
-
+        // ── Async results ─────────────────────────────────────────────────
         Message::SearchDone(Ok(results)) => {
             model.results = results;
-            model.selected = 0;
+            model.results_selected = 0;
             model.playback.error = None;
             Message::None
         }
@@ -160,13 +179,176 @@ pub fn update(
             Message::None
         }
 
-        Message::ArtworkReady(_, img) => {
-            model.artwork = picker.as_ref().map(|p| p.new_resize_protocol((*img).clone()));
+        Message::DownloadReady(ref id, ref path) => {
+            if model.playback.pending_id.as_ref() == Some(id) {
+                model.playback.pending_id = None;
+                model.playback.current_path = Some(path.clone());
+
+                if let Some(ref track) = model.playback.current {
+                    crate::library::save_sidecar(path, track);
+                }
+
+                if let Some(dir) = path.parent() {
+                    let fresh = crate::library::load_downloads(dir);
+                    if let Some(pos) = model.playlists.iter().position(|p| p.name == "Downloads") {
+                        model.playlists[pos] = fresh;
+                    } else {
+                        model.playlists.insert(0, fresh);
+                    }
+                }
+
+                match audio.play(path) {
+                    Ok(()) => {
+                        model.playback.status = AudioStatus::Playing;
+                        model.playback.error = None;
+                    }
+                    Err(e) => {
+                        model.playback.status = AudioStatus::Idle;
+                        model.playback.error = Some(e.to_string());
+                    }
+                }
+            }
             Message::None
         }
-        Message::ArtworkFailed(_) => {
-            model.artwork = None;
+        Message::DownloadFailed(ref id, ref err) => {
+            if model.playback.pending_id.as_ref() == Some(id) {
+                model.playback.pending_id = None;
+                model.playback.status = AudioStatus::Idle;
+                model.playback.error = Some(err.clone());
+            }
             Message::None
         }
     }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn nav_prev(model: &mut Model) {
+    match model.view {
+        View::Search => {
+            model.results_selected = model.results_selected.saturating_sub(1);
+        }
+        View::Player => match model.player_focus {
+            PlayerFocus::Playlists => {
+                model.playlist_selected = model.playlist_selected.saturating_sub(1);
+                model.playlist_track_selected = 0;
+            }
+            PlayerFocus::Songs => {
+                model.playlist_track_selected =
+                    model.playlist_track_selected.saturating_sub(1);
+            }
+        },
+    }
+}
+
+fn nav_next(model: &mut Model) {
+    match model.view {
+        View::Search => {
+            let max = model.results.tracks.len().saturating_sub(1);
+            if model.results_selected < max {
+                model.results_selected += 1;
+            }
+        }
+        View::Player => match model.player_focus {
+            PlayerFocus::Playlists => {
+                let max = model.playlists.len().saturating_sub(1);
+                if model.playlist_selected < max {
+                    model.playlist_selected += 1;
+                    model.playlist_track_selected = 0;
+                }
+            }
+            PlayerFocus::Songs => {
+                let max = model
+                    .playlists
+                    .get(model.playlist_selected)
+                    .map(|p| p.tracks.len().saturating_sub(1))
+                    .unwrap_or(0);
+                if model.playlist_track_selected < max {
+                    model.playlist_track_selected += 1;
+                }
+            }
+        },
+    }
+}
+
+fn handle_confirm(model: &mut Model, backend: &Backend, task: &Task<Message>) {
+    match model.view {
+        View::Search => {
+            if let Some(track) = model.results.tracks.get(model.results_selected).cloned() {
+                if !model.queue.iter().any(|t| t.id == track.id) {
+                    model.queue.push(track.clone());
+                }
+                if model.playback.status == AudioStatus::Idle {
+                    start_playing(model, track, backend, task);
+                }
+            }
+        }
+        View::Player => match model.player_focus {
+            PlayerFocus::Playlists => {
+                if model.playlist_selected < model.playlists.len() {
+                    model.player_focus = PlayerFocus::Songs;
+                    model.playlist_track_selected = 0;
+                }
+            }
+            PlayerFocus::Songs => {
+                let Some(playlist) = model.playlists.get(model.playlist_selected) else {
+                    return;
+                };
+                let Some(entry) =
+                    playlist.tracks.get(model.playlist_track_selected).cloned()
+                else {
+                    return;
+                };
+                let track = crate::models::Track {
+                    id: entry.id,
+                    title: entry.title,
+                    artist: entry.artist,
+                    album: None,
+                    duration: entry.duration_ms.map(std::time::Duration::from_millis),
+                    thumbnail: None,
+                };
+                if !model.queue.iter().any(|t| t.id == track.id) {
+                    model.queue.push(track.clone());
+                }
+                if model.playback.status == AudioStatus::Idle {
+                    start_playing(model, track, backend, task);
+                }
+            }
+        },
+    }
+}
+
+fn handle_back(model: &mut Model) {
+    match model.view {
+        View::Search => {
+            model.search_focus = SearchFocus::Results;
+        }
+        View::Player => {
+            if model.player_focus == PlayerFocus::Songs {
+                model.player_focus = PlayerFocus::Playlists;
+            }
+        }
+    }
+}
+
+fn start_playing(
+    model: &mut Model,
+    track: crate::models::Track,
+    backend: &Backend,
+    task: &Task<Message>,
+) {
+    model.playback.status = AudioStatus::Loading;
+    model.playback.current = Some(track.clone());
+    model.playback.pending_id = Some(track.id.clone());
+    model.playback.error = None;
+
+    let music_dir = backend.music_dir.clone();
+    let track_id = track.id.clone();
+    task.spawn(async move {
+        let result = crate::ytdlp::ensure_local_audio(&music_dir, &track_id);
+        match result {
+            Ok(path) => Message::DownloadReady(track_id, path),
+            Err(e) => Message::DownloadFailed(track_id, e.to_string()),
+        }
+    });
 }

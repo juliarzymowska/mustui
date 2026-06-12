@@ -17,14 +17,9 @@ async-compat   = "0.2"
 # TUI
 ratatui        = { version = "0.30", features = ["crossterm_0_29", "all-widgets"] }
 crossterm      = "0.29"
-ratatui-image  = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
-image          = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 # Audio
 rodio          = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"] }
-
-# HTTP (artwork fetch; uses tokio internally — runs via async-compat)
-reqwest        = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 # Serialization
 serde          = { version = "1", features = ["derive"] }

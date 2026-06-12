@@ -23,8 +23,20 @@ impl Audio {
 
     pub fn play(&mut self, path: &Path) -> anyhow::Result<()> {
         self.stop();
+
         let file = File::open(path)?;
-        let decoder = Decoder::new(BufReader::new(file))?;
+        let buf = BufReader::new(file);
+
+        // Symphonia's MP3 demuxer has an integer-overflow bug that panics on
+        // certain malformed files. Catch it and surface as a proper error.
+        let decoder = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Decoder::new(buf)
+        })) {
+            Ok(Ok(d)) => d,
+            Ok(Err(e)) => return Err(anyhow::anyhow!("decode error: {e}")),
+            Err(_) => return Err(anyhow::anyhow!("decoder panicked — file may be malformed")),
+        };
+
         let player = Player::connect_new(self.sink.mixer());
         player.append(decoder);
         player.play();

@@ -1,40 +1,14 @@
-pub mod layout;
-pub mod panes;
+pub mod player;
+pub mod search;
 pub mod theme;
 
-use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
+use ratatui::Frame;
 
-use crate::model::{InputMode, Model};
+use crate::model::{Model, View};
 
-pub fn draw(frame: &mut Frame, model: &Model) {
-    let layout = layout::compute(frame.area());
-
-    panes::playlists::draw(frame, layout.left);
-    panes::center::draw(frame, layout.center, model);
-    panes::now_playing::draw(frame, layout.right, model);
-    draw_status(frame, layout.status, model);
-}
-
-fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, model: &Model) {
-    let text = match &model.mode {
-        InputMode::Searching => format!("Search: {}█", model.query),
-        InputMode::Normal => {
-            if let Some(err) = &model.playback.error {
-                format!("Error: {err}")
-            } else {
-                " [/] search   [Space] pause   [l] loop   [q] quit".to_string()
-            }
-        }
-    };
-
-    let style = match &model.mode {
-        InputMode::Searching => theme::bold(),
-        InputMode::Normal if model.playback.error.is_some() => theme::normal(),
-        _ => theme::dimmed(),
-    };
-
-    frame.render_widget(
-        Paragraph::new(text).style(style).alignment(Alignment::Left),
-        area,
-    );
+pub fn draw(frame: &mut Frame, model: &mut Model) {
+    match model.view {
+        View::Search => search::draw(frame, frame.area(), model),
+        View::Player => player::draw(frame, frame.area(), model),
+    }
 }

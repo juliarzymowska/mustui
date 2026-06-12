@@ -1,8 +1,8 @@
 mod app;
 mod audio;
-mod artwork;
 mod client;
 mod error;
+mod library;
 mod logging;
 mod model;
 mod models;
@@ -19,8 +19,6 @@ use std::path::PathBuf;
 fn main() -> anyhow::Result<()> {
     let _log_guard = logging::init();
 
-    let picker: Option<ratatui_image::picker::Picker> = None;
-
     let backend = client::Backend::new()?;
     let audio = audio::Audio::new()?;
 
@@ -29,7 +27,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     let playlist_store = playlist::PlaylistStore::new(data_dir.join("playlists"))?;
 
-    let mut app = app::App::new(backend, audio, picker, playlist_store);
+    let mut app = app::App::new(backend, audio, playlist_store);
 
     let mut term = terminal::init();
     let result = app.run(&mut term);

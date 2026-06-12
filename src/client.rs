@@ -4,7 +4,6 @@ use directories::UserDirs;
 
 #[derive(Clone)]
 pub struct Backend {
-    pub(crate) http: reqwest::Client,
     pub(crate) music_dir: PathBuf,
 }
 
@@ -17,7 +16,6 @@ impl Backend {
                     .map(|h| PathBuf::from(h).join("Music"))
                     .unwrap_or_else(|_| PathBuf::from("Music"))
             });
-        let http = reqwest::Client::builder().build()?;
-        Ok(Self { http, music_dir })
+        Ok(Self { music_dir })
     }
 }
