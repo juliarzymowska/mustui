@@ -10,23 +10,38 @@ name = "ytm-tui"
 path = "src/main.rs"
 
 [dependencies]
-tokio              = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process"] }
-rodio              = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"] }
-reqwest            = "0.12"
-ratatui            = { version = "0.30", features = ["crossterm_0_29", "all-widgets"] }
-crossterm          = { version = "0.29", features = ["event-stream"] }
-futures            = "0.3"
-serde              = { version = "1", features = ["derive"] }
-serde_json         = "1"
-toml               = "0.8"
-thiserror          = "2"
-anyhow             = "1"
+# Async (lightweight, no macros)
+smol           = "2"
+async-compat   = "0.2"
+
+# TUI
+ratatui        = { version = "0.30", features = ["crossterm_0_29", "all-widgets"] }
+crossterm      = "0.29"
+ratatui-image  = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
+image          = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# Audio
+rodio          = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"] }
+
+# HTTP (artwork fetch; uses tokio internally — runs via async-compat)
+reqwest        = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+# Serialization
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+toml           = "0.8"
+
+# Error handling
+thiserror      = "2"
+anyhow         = "1"
+
+# Logging
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender   = "0.2"
-directories        = "5"
-ratatui-image      = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
-image              = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# Utilities
+directories = "5"
 
 [profile.release]
 strip = true

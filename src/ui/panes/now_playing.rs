@@ -4,9 +4,9 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph},
 };
 
-use crate::{app::App, messages::{LoopMode, PlaybackStatus}, ui::theme};
+use crate::{model::{AudioStatus, LoopMode, Model}, ui::theme};
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, model: &Model) {
     let block = Block::new().borders(Borders::ALL).title(" Now Playing ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -23,7 +23,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .areas(inner);
 
-    match &app.player_state.current {
+    match &model.playback.current {
         None => {
             frame.render_widget(
                 Paragraph::new("Nothing playing").style(theme::dimmed()),
@@ -44,14 +44,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
 
             let (ratio, label) = match track.duration {
                 Some(dur) if !dur.is_zero() => {
-                    let pos = app.player_state.position;
+                    let pos = model.playback.position;
                     let r = (pos.as_secs_f64() / dur.as_secs_f64()).clamp(0.0, 1.0);
                     let label = format!(
                         "{:02}:{:02} / {:02}:{:02}",
-                        pos.as_secs() / 60,
-                        pos.as_secs() % 60,
-                        dur.as_secs() / 60,
-                        dur.as_secs() % 60,
+                        pos.as_secs() / 60, pos.as_secs() % 60,
+                        dur.as_secs() / 60, dur.as_secs() % 60,
                     );
                     (r, label)
                 }
@@ -69,13 +67,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let status_str = match app.player_state.status {
-        PlaybackStatus::Playing => ">> Playing",
-        PlaybackStatus::Paused => "|| Paused",
-        PlaybackStatus::Loading => ".. Loading",
-        PlaybackStatus::Idle => "   Idle",
+    let status_str = match model.playback.status {
+        AudioStatus::Playing => ">> Playing",
+        AudioStatus::Paused  => "|| Paused",
+        AudioStatus::Loading => ".. Loading",
+        AudioStatus::Idle    => "   Idle",
     };
-    let loop_str = match app.player_state.loop_mode {
+    let loop_str = match model.playback.loop_mode {
         LoopMode::One => "  [loop: on]",
         LoopMode::Off => "",
     };

@@ -1,215 +1,108 @@
-use futures::StreamExt;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
-use tokio::sync::{broadcast, mpsc};
-use tokio::time::{Duration, interval};
 
 use crate::{
-    action::Action,
-    artwork,
+    audio::Audio,
     client::Backend,
-    events,
-    messages::{DataMessage, LoopMode, PlayerCommand, PlayerState},
-    models::{SearchResults, TrackId},
-    player::PlayerHandle,
+    model::{InputMode, Model},
+    msg::Message,
     playlist::PlaylistStore,
+    task::Task,
     ui,
+    update::update,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InputMode {
-    Normal,
-    Searching,
-}
-
 pub struct App {
-    pub backend: Backend,
-    pub player: PlayerHandle,
-    pub mode: InputMode,
-    pub query: String,
-    pub results: SearchResults,
-    pub selected: usize,
-    pub player_state: PlayerState,
-    pub artwork: Option<StatefulProtocol>,
-    pub picker: Option<Picker>,
+    pub model: Model,
+    audio: Audio,
+    backend: Backend,
+    task: Task<Message>,
+    task_rx: mpsc::Receiver<Message>,
+    picker: Option<Picker>,
     pub playlist_store: PlaylistStore,
-    pub should_quit: bool,
-    data_tx: mpsc::Sender<DataMessage>,
-    data_rx: mpsc::Receiver<DataMessage>,
 }
 
 impl App {
     pub fn new(
         backend: Backend,
-        player: PlayerHandle,
+        audio: Audio,
         picker: Option<Picker>,
         playlist_store: PlaylistStore,
     ) -> Self {
-        let (data_tx, data_rx) = mpsc::channel(64);
+        let (task_tx, task_rx) = mpsc::channel();
         Self {
+            model: Model::default(),
+            audio,
             backend,
-            player,
-            mode: InputMode::Normal,
-            query: String::new(),
-            results: SearchResults::default(),
-            selected: 0,
-            player_state: PlayerState::default(),
-            artwork: None,
+            task: Task::new(task_tx),
+            task_rx,
             picker,
             playlist_store,
-            should_quit: false,
-            data_tx,
-            data_rx,
         }
     }
-}
 
-pub async fn run(mut app: App, mut terminal: ratatui::DefaultTerminal) -> anyhow::Result<()> {
-    let mut events = crossterm::event::EventStream::new();
-    let mut ticker = interval(Duration::from_millis(100));
-    let mut state_rx: broadcast::Receiver<PlayerState> = app.player.subscribe();
+    pub fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
+        let tick_rate = Duration::from_millis(40);
+        let mut last_tick = Instant::now();
 
-    while !app.should_quit {
-        terminal.draw(|f| ui::draw(f, &mut app))?;
+        while !self.model.should_quit {
+            terminal.draw(|f| ui::draw(f, &self.model))?;
 
-        tokio::select! {
-            biased;
-
-            Some(Ok(ev)) = events.next() => {
-                if let crossterm::event::Event::Key(key) = ev {
-                    if key.kind == crossterm::event::KeyEventKind::Press {
-                        if let Some(action) = events::translate(key, &app.mode) {
-                            handle_action(&mut app, action).await;
-                        }
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            if event::poll(timeout)? {
+                if let event::Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        let msg = translate_key(key, &self.model.mode);
+                        self.dispatch(msg);
                     }
                 }
             }
 
-            Ok(state) = state_rx.recv() => {
-                let track_changed = app.player_state.current.as_ref().map(|t| &t.id)
-                    != state.current.as_ref().map(|t| &t.id);
-                app.player_state = state;
-                if track_changed {
-                    app.artwork = None;
-                    if let Some(track) = &app.player_state.current {
-                        if let Some(thumb) = &track.thumbnail {
-                            spawn_artwork_fetch(
-                                app.backend.clone(),
-                                track.id.clone(),
-                                thumb.url.clone(),
-                                app.data_tx.clone(),
-                            );
-                        }
-                    }
-                }
+            if last_tick.elapsed() >= tick_rate {
+                self.dispatch(Message::Tick);
+                last_tick = Instant::now();
             }
 
-            Some(msg) = app.data_rx.recv() => {
-                handle_data(&mut app, msg);
+            while let Ok(msg) = self.task_rx.try_recv() {
+                self.dispatch(msg);
             }
-
-            _ = ticker.tick() => {}
         }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-async fn handle_action(app: &mut App, action: Action) {
-    match action {
-        Action::Quit => app.should_quit = true,
-
-        Action::StartSearch => {
-            app.mode = InputMode::Searching;
-            app.query.clear();
-        }
-        Action::CancelSearch => {
-            app.mode = InputMode::Normal;
-        }
-        Action::SubmitSearch => {
-            app.mode = InputMode::Normal;
-            if !app.query.is_empty() {
-                spawn_search(app.backend.clone(), app.query.clone(), app.data_tx.clone());
-            }
-        }
-        Action::SearchInput(c) => app.query.push(c),
-        Action::SearchBackspace => { app.query.pop(); }
-
-        Action::SelectNext => {
-            if app.selected + 1 < app.results.tracks.len() {
-                app.selected += 1;
-            }
-        }
-        Action::SelectPrev => {
-            app.selected = app.selected.saturating_sub(1);
-        }
-
-        Action::PlaySelected => {
-            if let Some(track) = app.results.tracks.get(app.selected).cloned() {
-                let _ = app.player.send(PlayerCommand::Play(track)).await;
-            }
-        }
-        Action::TogglePause => {
-            let _ = app.player.send(PlayerCommand::TogglePause).await;
-        }
-        Action::ToggleLoop => {
-            let next = match app.player_state.loop_mode {
-                LoopMode::Off => LoopMode::One,
-                LoopMode::One => LoopMode::Off,
-            };
-            let _ = app.player.send(PlayerCommand::SetLoop(next)).await;
+    fn dispatch(&mut self, msg: Message) {
+        let mut next = update(&mut self.model, msg, &mut self.audio, &self.backend, &self.task, &self.picker);
+        while !matches!(next, Message::None) {
+            next = update(&mut self.model, next, &mut self.audio, &self.backend, &self.task, &self.picker);
         }
     }
 }
 
-fn handle_data(app: &mut App, msg: DataMessage) {
-    match msg {
-        DataMessage::SearchCompleted(results) => {
-            app.results = results;
-            app.selected = 0;
-        }
-        DataMessage::SearchFailed { error, .. } => {
-            app.player_state.error = Some(error);
-        }
-        DataMessage::ArtworkReady { image, .. } => {
-            if let Some(picker) = &app.picker {
-                app.artwork = Some(picker.new_resize_protocol((*image).clone()));
-            }
-        }
-        DataMessage::ArtworkFailed { .. } => {
-            app.artwork = None;
-        }
+fn translate_key(key: event::KeyEvent, mode: &InputMode) -> Message {
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return Message::Quit;
     }
-}
-
-fn spawn_search(backend: Backend, query: String, tx: mpsc::Sender<DataMessage>) {
-    tokio::spawn(async move {
-        let msg = match backend.search(&query).await {
-            Ok(results) => DataMessage::SearchCompleted(results),
-            Err(e) => DataMessage::SearchFailed { query, error: e.to_string() },
-        };
-        let _ = tx.send(msg).await;
-    });
-}
-
-fn spawn_artwork_fetch(
-    backend: Backend,
-    track_id: TrackId,
-    url: String,
-    tx: mpsc::Sender<DataMessage>,
-) {
-    tokio::spawn(async move {
-        let result = artwork::fetch_artwork(&backend, &url).await;
-        let msg = match result {
-            Ok(img) => DataMessage::ArtworkReady {
-                track_id,
-                image: std::sync::Arc::new(img),
-            },
-            Err(e) => DataMessage::ArtworkFailed {
-                track_id,
-                error: e.to_string(),
-            },
-        };
-        let _ = tx.send(msg).await;
-    });
+    match mode {
+        InputMode::Normal => match key.code {
+            KeyCode::Char('q') => Message::Quit,
+            KeyCode::Char('/') => Message::EnterSearch,
+            KeyCode::Char(' ') => Message::TogglePause,
+            KeyCode::Char('l') => Message::ToggleLoop,
+            KeyCode::Char('j') | KeyCode::Down => Message::SelectNext,
+            KeyCode::Char('k') | KeyCode::Up => Message::SelectPrev,
+            KeyCode::Enter => Message::PlaySelected,
+            _ => Message::None,
+        },
+        InputMode::Searching => match key.code {
+            KeyCode::Esc => Message::CancelSearch,
+            KeyCode::Enter => Message::SubmitSearch,
+            KeyCode::Backspace => Message::SearchBackspace,
+            KeyCode::Char(c) => Message::SearchChar(c),
+            _ => Message::None,
+        },
+    }
 }

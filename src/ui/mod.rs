@@ -4,22 +4,22 @@ pub mod theme;
 
 use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
-use crate::app::{App, InputMode};
+use crate::model::{InputMode, Model};
 
-pub fn draw(frame: &mut Frame, app: &mut App) {
+pub fn draw(frame: &mut Frame, model: &Model) {
     let layout = layout::compute(frame.area());
 
     panes::playlists::draw(frame, layout.left);
-    panes::center::draw(frame, layout.center, app);
-    panes::now_playing::draw(frame, layout.right, app);
-    draw_status(frame, layout.status, app);
+    panes::center::draw(frame, layout.center, model);
+    panes::now_playing::draw(frame, layout.right, model);
+    draw_status(frame, layout.status, model);
 }
 
-fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let text = match &app.mode {
-        InputMode::Searching => format!("Search: {}█", app.query),
+fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, model: &Model) {
+    let text = match &model.mode {
+        InputMode::Searching => format!("Search: {}█", model.query),
         InputMode::Normal => {
-            if let Some(err) = &app.player_state.error {
+            if let Some(err) = &model.playback.error {
                 format!("Error: {err}")
             } else {
                 " [/] search   [Space] pause   [l] loop   [q] quit".to_string()
@@ -27,9 +27,9 @@ fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
         }
     };
 
-    let style = match &app.mode {
+    let style = match &model.mode {
         InputMode::Searching => theme::bold(),
-        InputMode::Normal if app.player_state.error.is_some() => theme::normal(),
+        InputMode::Normal if model.playback.error.is_some() => theme::normal(),
         _ => theme::dimmed(),
     };
 
