@@ -69,8 +69,8 @@ fn audio_score(e: &FlatEntry) -> i32 {
     if t.contains("(cover)") || t.contains("cover version") || t.contains("fan cover") { score -= 6; }
     if t.contains("karaoke") || t.contains("instrumental") || t.contains("backing track") { score -= 10; }
     if t.contains("remix") || t.contains("re-mix") { score -= 3; }
-    if let Some(dur) = e.duration {
-        if dur < 90.0 || dur > 600.0 { score -= 4; }
+    if e.duration.is_some_and(|d| !(90.0..=600.0).contains(&d)) {
+        score -= 4;
     }
     score
 }
@@ -159,7 +159,7 @@ impl FlatEntry {
             title: self.title,
             artist,
             album: self.album,
-            duration: self.duration.map(|s| Duration::from_secs_f64(s)),
+            duration: self.duration.map(Duration::from_secs_f64),
             thumbnail,
         }
     }

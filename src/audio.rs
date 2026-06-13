@@ -58,7 +58,7 @@ impl Audio {
         }
     }
 
-    pub fn stop(&mut self) {
+    fn stop(&mut self) {
         if let Some(p) = self.player.take() {
             p.stop();
         }

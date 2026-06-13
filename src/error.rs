@@ -4,8 +4,6 @@ use thiserror::Error;
 pub enum CoreError {
     #[error("yt-dlp: {0}")]
     YtDlpFailed(String),
-    #[error("player actor disconnected")]
-    PlayerDisconnected,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }

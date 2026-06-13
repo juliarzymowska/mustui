@@ -104,22 +104,8 @@ fn draw_results(frame: &mut Frame, area: Rect, model: &Model) {
                 .duration
                 .map(|d| format!(" [{:02}:{:02}]", d.as_secs() / 60, d.as_secs() % 60))
                 .unwrap_or_default();
-            ListItem::new(format!("{} — {}{}", t.artist, t.title, dur))
-        })
-        .collect();
-
-    let already_queued: Vec<bool> = model
-        .results
-        .tracks
-        .iter()
-        .map(|t| model.queue.iter().any(|q| q.id == t.id))
-        .collect();
-
-    let items: Vec<ListItem> = items
-        .into_iter()
-        .zip(already_queued)
-        .map(|(item, queued)| {
-            if queued {
+            let item = ListItem::new(format!("{} — {}{}", t.artist, t.title, dur));
+            if model.queue.iter().any(|q| q.id == t.id) {
                 item.style(Style::default().add_modifier(Modifier::DIM))
             } else {
                 item
@@ -168,7 +154,7 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         String::new()
     };
 
-    let lines = vec![
+    let lines = [
         format!("Title:    {}", track.title),
         format!("Artist:   {}", track.artist),
         format!("Album:    {}", track.album.as_deref().unwrap_or("—")),
