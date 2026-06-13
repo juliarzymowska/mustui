@@ -8,7 +8,6 @@ use crate::{
     client::Backend,
     model::{Model, SearchFocus, View},
     msg::Message,
-    playlist::PlaylistStore,
     task::Task,
     ui,
     update::update,
@@ -20,15 +19,10 @@ pub struct App {
     backend: Backend,
     task: Task<Message>,
     task_rx: mpsc::Receiver<Message>,
-    pub playlist_store: PlaylistStore,
 }
 
 impl App {
-    pub fn new(
-        backend: Backend,
-        audio: Audio,
-        playlist_store: PlaylistStore,
-    ) -> Self {
+    pub fn new(backend: Backend, audio: Audio) -> Self {
         let (task_tx, task_rx) = mpsc::channel();
         Self {
             model: Model::default(),
@@ -36,17 +30,11 @@ impl App {
             backend,
             task: Task::new(task_tx),
             task_rx,
-            playlist_store,
         }
     }
 
     pub fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
-        let mut playlists = self.playlist_store.load_all();
-        let downloads = crate::library::load_downloads(&self.backend.music_dir);
-        if !downloads.tracks.is_empty() {
-            playlists.insert(0, downloads);
-        }
-        self.model.playlists = playlists;
+        self.model.library = crate::library::load_downloads(&self.backend.music_dir);
 
         let tick_rate = Duration::from_millis(40);
         let mut last_tick = Instant::now();
@@ -78,21 +66,10 @@ impl App {
     }
 
     fn dispatch(&mut self, msg: Message) {
-        let mut next = update(
-            &mut self.model,
-            msg,
-            &mut self.audio,
-            &self.backend,
-            &self.task,
-        );
+        let mut next =
+            update(&mut self.model, msg, &mut self.audio, &self.backend, &self.task);
         while !matches!(next, Message::None) {
-            next = update(
-                &mut self.model,
-                next,
-                &mut self.audio,
-                &self.backend,
-                &self.task,
-            );
+            next = update(&mut self.model, next, &mut self.audio, &self.backend, &self.task);
         }
     }
 }
@@ -122,6 +99,9 @@ fn translate_search(key: event::KeyEvent, focus: &SearchFocus) -> Message {
             KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
             KeyCode::Enter => Message::Confirm,
+            KeyCode::Char('a') => Message::AddToQueue,
+            KeyCode::Char('H') => Message::SkipPrev,
+            KeyCode::Char('L') => Message::SkipNext,
             KeyCode::Tab => Message::ToggleView,
             KeyCode::Char('q') => Message::Quit,
             _ => Message::None,
@@ -135,17 +115,12 @@ fn translate_player(key: event::KeyEvent) -> Message {
         KeyCode::Char('r') => Message::ToggleLoop,
         KeyCode::Tab => Message::ToggleView,
         KeyCode::Char('q') => Message::Quit,
-
-        KeyCode::Char('h') | KeyCode::Left => Message::FocusLeft,
-        KeyCode::Char('l') | KeyCode::Right => Message::FocusRight,
         KeyCode::Char('H') => Message::SkipPrev,
         KeyCode::Char('L') => Message::SkipNext,
-
         KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
         KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
         KeyCode::Enter => Message::Confirm,
         KeyCode::Esc => Message::Back,
-
         _ => Message::None,
     }
 }

@@ -75,11 +75,16 @@ fn audio_score(e: &FlatEntry) -> i32 {
     score
 }
 
+const AUDIO_EXTS: &[&str] = &["m4a", "webm", "opus", "mp3"];
+
 pub(crate) fn ensure_local_audio(music_dir: &Path, id: &TrackId) -> Result<PathBuf> {
-    let target = music_dir.join(format!("{}.mp3", id.0));
-    if target.exists() {
-        debug!(path = %target.display(), "audio cache hit");
-        return Ok(target);
+    // Return any cached audio file for this id.
+    for ext in AUDIO_EXTS {
+        let p = music_dir.join(format!("{}.{ext}", id.0));
+        if p.exists() {
+            debug!(path = %p.display(), "audio cache hit");
+            return Ok(p);
+        }
     }
 
     std::fs::create_dir_all(music_dir)?;
@@ -87,32 +92,34 @@ pub(crate) fn ensure_local_audio(music_dir: &Path, id: &TrackId) -> Result<PathB
     let url = format!("https://www.youtube.com/watch?v={}", id.0);
     let template = music_dir.join("%(id)s.%(ext)s");
 
+    // No -x / --audio-format: grab the native stream so ffmpeg/ffprobe are not required.
+    // YouTube almost always has m4a; webm/opus is the fallback.
     let output = Command::new("yt-dlp")
-        .args(["-x", "--audio-format", "mp3", "--audio-quality", "0",
-               "--no-playlist", "--no-warnings", "--ignore-config", "-o"])
+        .args([
+            "--format", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+            "--no-playlist", "--no-warnings", "--ignore-config", "-o",
+        ])
         .arg(&template)
         .arg(&url)
         .stdin(Stdio::null())
         .output()
         .map_err(|e| CoreError::YtDlpFailed(format!("spawn yt-dlp: {e}")))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        return Err(CoreError::YtDlpFailed(format!(
-            "yt-dlp download exited {:?}: {}",
-            output.status.code(),
-            stderr.trim()
-        )));
+    // Check for the file before trusting the exit code — yt-dlp exits non-zero
+    // on ffprobe warnings even when the download itself succeeded.
+    for ext in AUDIO_EXTS {
+        let p = music_dir.join(format!("{}.{ext}", id.0));
+        if p.exists() {
+            return Ok(p);
+        }
     }
 
-    if !target.exists() {
-        return Err(CoreError::YtDlpFailed(format!(
-            "yt-dlp succeeded but {} is missing",
-            target.display()
-        )));
-    }
-
-    Ok(target)
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    Err(CoreError::YtDlpFailed(format!(
+        "yt-dlp download exited {:?}: {}",
+        output.status.code(),
+        stderr.trim()
+    )))
 }
 
 #[derive(Debug, Deserialize)]

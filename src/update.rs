@@ -1,7 +1,7 @@
 use crate::{
     audio::Audio,
     client::Backend,
-    model::{AudioStatus, LoopMode, Model, PlayerFocus, SearchFocus, View},
+    model::{AudioStatus, LoopMode, Model, SearchFocus, View},
     msg::Message,
     task::Task,
 };
@@ -37,7 +37,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Auto-advance / user skip ────────────────────────────────────────
+        // ── Auto-advance queue ──────────────────────────────────────────────
         Message::PlayNext => {
             let next_idx = model
                 .queue
@@ -57,6 +57,7 @@ pub fn update(
             Message::None
         }
 
+        // ── User-triggered queue skip (always wraps) ───────────────────────
         Message::SkipNext => {
             if model.queue.is_empty() {
                 return Message::None;
@@ -112,25 +113,13 @@ pub fn update(
             Message::None
         }
 
-        // ── Navigations routed by view/focus ─────────────────────────────
+        // ── Navigation routed by view ────────────────────────────────────
         Message::NavUp => {
             nav_prev(model);
             Message::None
         }
         Message::NavDown => {
             nav_next(model);
-            Message::None
-        }
-        Message::FocusLeft => {
-            if model.view == View::Player {
-                model.player_focus = PlayerFocus::Playlists;
-            }
-            Message::None
-        }
-        Message::FocusRight => {
-            if model.view == View::Player {
-                model.player_focus = PlayerFocus::Songs;
-            }
             Message::None
         }
         Message::Confirm => {
@@ -179,6 +168,15 @@ pub fn update(
             Message::None
         }
 
+        Message::AddToQueue => {
+            if let Some(track) = model.results.tracks.get(model.results_selected).cloned() {
+                if !model.queue.iter().any(|t| t.id == track.id) {
+                    model.queue.push(track);
+                }
+            }
+            Message::None
+        }
+
         Message::DownloadReady(ref id, ref path) => {
             if model.playback.pending_id.as_ref() == Some(id) {
                 model.playback.pending_id = None;
@@ -188,13 +186,9 @@ pub fn update(
                     crate::library::save_sidecar(path, track);
                 }
 
-                if let Some(dir) = path.parent() {
-                    let fresh = crate::library::load_downloads(dir);
-                    if let Some(pos) = model.playlists.iter().position(|p| p.name == "Downloads") {
-                        model.playlists[pos] = fresh;
-                    } else {
-                        model.playlists.insert(0, fresh);
-                    }
+                model.library = crate::library::load_downloads(&backend.music_dir);
+                if !model.library.is_empty() && model.library_selected >= model.library.len() {
+                    model.library_selected = model.library.len() - 1;
                 }
 
                 match audio.play(path) {
@@ -228,16 +222,9 @@ fn nav_prev(model: &mut Model) {
         View::Search => {
             model.results_selected = model.results_selected.saturating_sub(1);
         }
-        View::Player => match model.player_focus {
-            PlayerFocus::Playlists => {
-                model.playlist_selected = model.playlist_selected.saturating_sub(1);
-                model.playlist_track_selected = 0;
-            }
-            PlayerFocus::Songs => {
-                model.playlist_track_selected =
-                    model.playlist_track_selected.saturating_sub(1);
-            }
-        },
+        View::Player => {
+            model.library_selected = model.library_selected.saturating_sub(1);
+        }
     }
 }
 
@@ -249,25 +236,12 @@ fn nav_next(model: &mut Model) {
                 model.results_selected += 1;
             }
         }
-        View::Player => match model.player_focus {
-            PlayerFocus::Playlists => {
-                let max = model.playlists.len().saturating_sub(1);
-                if model.playlist_selected < max {
-                    model.playlist_selected += 1;
-                    model.playlist_track_selected = 0;
-                }
+        View::Player => {
+            let max = model.library.len().saturating_sub(1);
+            if model.library_selected < max {
+                model.library_selected += 1;
             }
-            PlayerFocus::Songs => {
-                let max = model
-                    .playlists
-                    .get(model.playlist_selected)
-                    .map(|p| p.tracks.len().saturating_sub(1))
-                    .unwrap_or(0);
-                if model.playlist_track_selected < max {
-                    model.playlist_track_selected += 1;
-                }
-            }
-        },
+        }
     }
 }
 
@@ -275,46 +249,28 @@ fn handle_confirm(model: &mut Model, backend: &Backend, task: &Task<Message>) {
     match model.view {
         View::Search => {
             if let Some(track) = model.results.tracks.get(model.results_selected).cloned() {
-                if !model.queue.iter().any(|t| t.id == track.id) {
-                    model.queue.push(track.clone());
-                }
-                if model.playback.status == AudioStatus::Idle {
-                    start_playing(model, track, backend, task);
-                }
+                start_playing(model, track, backend, task);
             }
         }
-        View::Player => match model.player_focus {
-            PlayerFocus::Playlists => {
-                if model.playlist_selected < model.playlists.len() {
-                    model.player_focus = PlayerFocus::Songs;
-                    model.playlist_track_selected = 0;
-                }
+        View::Player => {
+            let Some(entry) = model.library.get(model.library_selected).cloned() else {
+                return;
+            };
+            let track = crate::models::Track {
+                id: entry.id,
+                title: entry.title,
+                artist: entry.artist,
+                album: None,
+                duration: entry.duration_ms.map(std::time::Duration::from_millis),
+                thumbnail: None,
+            };
+            if !model.queue.iter().any(|t| t.id == track.id) {
+                model.queue.push(track.clone());
             }
-            PlayerFocus::Songs => {
-                let Some(playlist) = model.playlists.get(model.playlist_selected) else {
-                    return;
-                };
-                let Some(entry) =
-                    playlist.tracks.get(model.playlist_track_selected).cloned()
-                else {
-                    return;
-                };
-                let track = crate::models::Track {
-                    id: entry.id,
-                    title: entry.title,
-                    artist: entry.artist,
-                    album: None,
-                    duration: entry.duration_ms.map(std::time::Duration::from_millis),
-                    thumbnail: None,
-                };
-                if !model.queue.iter().any(|t| t.id == track.id) {
-                    model.queue.push(track.clone());
-                }
-                if model.playback.status == AudioStatus::Idle {
-                    start_playing(model, track, backend, task);
-                }
+            if model.playback.status == AudioStatus::Idle {
+                start_playing(model, track, backend, task);
             }
-        },
+        }
     }
 }
 
@@ -323,11 +279,7 @@ fn handle_back(model: &mut Model) {
         View::Search => {
             model.search_focus = SearchFocus::Results;
         }
-        View::Player => {
-            if model.player_focus == PlayerFocus::Songs {
-                model.player_focus = PlayerFocus::Playlists;
-            }
-        }
+        View::Player => {}
     }
 }
 

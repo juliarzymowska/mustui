@@ -26,3 +26,11 @@ pub struct SearchResults {
     pub query: String,
     pub tracks: Vec<Track>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistEntry {
+    pub id: TrackId,
+    pub title: String,
+    pub artist: String,
+    pub duration_ms: Option<u64>,
+}

@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::{
-    models::{SearchResults, Track, TrackId},
-    playlist::Playlist,
-};
+use crate::models::{PlaylistEntry, SearchResults, Track, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum View {
@@ -13,20 +10,11 @@ pub enum View {
     Player,
 }
 
-/// Focus within the Search view.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SearchFocus {
     #[default]
     Input,
     Results,
-}
-
-/// Focus within the Player view.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum PlayerFocus {
-    #[default]
-    Playlists,
-    Songs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -68,10 +56,8 @@ pub struct Model {
     pub results_selected: usize,
 
     // ── Player view ─────────────────────────────
-    pub player_focus: PlayerFocus,
-    pub playlists: Vec<Playlist>,
-    pub playlist_selected: usize,
-    pub playlist_track_selected: usize,
+    pub library: Vec<PlaylistEntry>,
+    pub library_selected: usize,
     pub queue: Vec<Track>,
 
     // ── Shared ──────────────────────────────────

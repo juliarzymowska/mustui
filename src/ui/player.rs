@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    model::{AudioStatus, LoopMode, Model, PlayerFocus},
+    model::{AudioStatus, LoopMode, Model},
     ui::theme,
 };
 
@@ -17,34 +17,29 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &mut Model) {
     ])
     .areas(area);
 
-    let [playlists_area, songs_area, queue_area] = Layout::horizontal([
-        Constraint::Percentage(25),
-        Constraint::Percentage(45),
-        Constraint::Percentage(30),
+    let [songs_area, queue_area] = Layout::horizontal([
+        Constraint::Percentage(60),
+        Constraint::Percentage(40),
     ])
     .areas(main_area);
 
-    draw_playlists(frame, playlists_area, model);
     draw_songs(frame, songs_area, model);
     draw_queue(frame, queue_area, model);
     draw_now_playing(frame, now_playing_area, model);
     draw_shortcuts(frame, shortcuts_area, model);
 }
 
-fn draw_playlists(frame: &mut Frame, area: Rect, model: &Model) {
-    let focused = model.player_focus == PlayerFocus::Playlists;
-    let border_style = if focused { theme::accent() } else { Default::default() };
-
+fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
     let block = Block::new()
         .borders(Borders::ALL)
-        .title(" Playlists ")
-        .border_style(border_style);
+        .title(" Library ")
+        .border_style(theme::accent());
 
-    if model.playlists.is_empty() {
+    if model.library.is_empty() {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         frame.render_widget(
-            Paragraph::new("no playlists yet")
+            Paragraph::new("no downloads yet — search and play a track")
                 .style(theme::dimmed())
                 .alignment(Alignment::Center),
             Rect { y: inner.y + inner.height / 2, height: 1, ..inner },
@@ -53,58 +48,7 @@ fn draw_playlists(frame: &mut Frame, area: Rect, model: &Model) {
     }
 
     let items: Vec<ListItem> = model
-        .playlists
-        .iter()
-        .map(|p| ListItem::new(format!("{} ({})", p.name, p.tracks.len())))
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(theme::reversed())
-        .highlight_symbol("> ");
-
-    let mut state = ListState::default().with_selected(Some(model.playlist_selected));
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
-    let focused = model.player_focus == PlayerFocus::Songs;
-    let border_style = if focused { theme::accent() } else { Default::default() };
-
-    let playlist = model.playlists.get(model.playlist_selected);
-    let title = match playlist {
-        Some(p) => format!(" {} ", p.name),
-        None => " Songs ".to_owned(),
-    };
-    let block = Block::new()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(border_style);
-
-    let Some(playlist) = playlist else {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        frame.render_widget(
-            Paragraph::new("no playlist selected")
-                .style(theme::dimmed())
-                .alignment(Alignment::Center),
-            Rect { y: inner.y + inner.height / 2, height: 1, ..inner },
-        );
-        return;
-    };
-
-    if playlist.tracks.is_empty() {
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        frame.render_widget(
-            Paragraph::new("empty playlist").style(theme::dimmed()),
-            inner,
-        );
-        return;
-    }
-
-    let items: Vec<ListItem> = playlist
-        .tracks
+        .library
         .iter()
         .map(|t| {
             let dur = t
@@ -118,9 +62,7 @@ fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
         })
         .collect();
 
-    let sel = model
-        .playlist_track_selected
-        .min(playlist.tracks.len().saturating_sub(1));
+    let sel = model.library_selected.min(model.library.len().saturating_sub(1));
 
     let list = List::new(items)
         .block(block)
@@ -244,11 +186,7 @@ fn draw_now_playing(frame: &mut Frame, area: Rect, model: &Model) {
 }
 
 fn draw_shortcuts(frame: &mut Frame, area: Rect, _model: &Model) {
-    frame.render_widget(
-        Paragraph::new(
-            " [Space] pause  [r] loop  [h/l] focus  [H/L] prev/next  [j/k] nav  [↵] play/select  [Esc] back  [Tab] search  [q] quit",
-        )
-        .style(theme::dimmed()),
-        area,
-    );
+    let text =
+        " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [↵] play  [Tab] search  [q] quit";
+    frame.render_widget(Paragraph::new(text).style(theme::dimmed()), area);
 }

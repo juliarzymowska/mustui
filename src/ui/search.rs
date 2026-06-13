@@ -36,7 +36,7 @@ fn draw_shortcuts(frame: &mut Frame, area: Rect, model: &Model) {
             " [Enter] search  [Esc] go to results  [Tab] player  [Ctrl-C] quit"
         }
         SearchFocus::Results => {
-            " [/][Esc] edit search  [j/k] navigate  [Enter] add to queue  [Tab] player  [q] quit"
+            " [/][Esc] edit search  [j/k] nav  [↵] play now  [a] add to queue  [Tab] player  [q] quit"
         }
     };
     frame.render_widget(Paragraph::new(text).style(theme::dimmed()), area);
@@ -162,6 +162,12 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
         .unwrap_or_else(|| "—".to_owned());
 
+    let status_line = if let Some(ref err) = model.playback.error {
+        format!("⚠ {err}")
+    } else {
+        String::new()
+    };
+
     let lines = vec![
         format!("Title:    {}", track.title),
         format!("Artist:   {}", track.artist),
@@ -169,10 +175,11 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         format!("Duration: {}", dur_str),
         String::new(),
         if already_queued {
-            "✓ already in queue".to_owned()
+            "[↵] play now  ✓ already in queue".to_owned()
         } else {
-            "[Enter] download & add to queue".to_owned()
+            "[↵] play now  [a] add to queue".to_owned()
         },
+        status_line,
     ];
 
     frame.render_widget(

@@ -15,8 +15,6 @@ pub enum Message {
     // ── Navigation (context-routed in update) ───
     NavUp,
     NavDown,
-    FocusLeft,
-    FocusRight,
     Confirm,
     Back,
 
@@ -37,4 +35,7 @@ pub enum Message {
     // ── User-triggered queue skip (always wraps) ─
     SkipNext,
     SkipPrev,
+
+    // ── Queue management ─────────────────────────
+    AddToQueue,
 }

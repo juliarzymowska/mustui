@@ -1,15 +1,12 @@
 use std::path::Path;
 
-use crate::{
-    models::Track,
-    playlist::{Playlist, PlaylistEntry},
-};
+use crate::models::{PlaylistEntry, Track};
 
 /// Scan `music_dir` for `<id>.json` metadata sidecars (written on each download)
-/// and return them as a "Downloads" playlist.
-pub fn load_downloads(music_dir: &Path) -> Playlist {
+/// and return them as a sorted list of tracks.
+pub fn load_downloads(music_dir: &Path) -> Vec<PlaylistEntry> {
     let Ok(dir) = std::fs::read_dir(music_dir) else {
-        return Playlist { name: "Downloads".to_owned(), tracks: vec![] };
+        return vec![];
     };
 
     let mut tracks: Vec<PlaylistEntry> = dir
@@ -19,9 +16,10 @@ pub fn load_downloads(music_dir: &Path) -> Playlist {
             let text = std::fs::read_to_string(e.path()).ok()?;
             let track: Track = serde_json::from_str(&text).ok()?;
             // Only include it if the audio file actually exists alongside the sidecar
-            let audio = e.path().with_extension("mp3");
-            let audio_m4a = e.path().with_extension("m4a");
-            if !audio.exists() && !audio_m4a.exists() {
+            let has_audio = ["mp3", "m4a", "webm", "opus"]
+                .iter()
+                .any(|ext| e.path().with_extension(ext).exists());
+            if !has_audio {
                 return None;
             }
             Some(PlaylistEntry {
@@ -34,8 +32,7 @@ pub fn load_downloads(music_dir: &Path) -> Playlist {
         .collect();
 
     tracks.sort_by(|a, b| a.artist.cmp(&b.artist).then(a.title.cmp(&b.title)));
-
-    Playlist { name: "Downloads".to_owned(), tracks }
+    tracks
 }
 
 /// Write a metadata sidecar `<stem>.json` next to the audio file so
