@@ -117,10 +117,14 @@ fn translate_player(key: event::KeyEvent) -> Message {
         KeyCode::Char('q') => Message::Quit,
         KeyCode::Char('H') => Message::SkipPrev,
         KeyCode::Char('L') => Message::SkipNext,
+        KeyCode::Char('h') | KeyCode::Left => Message::FocusLeft,
+        KeyCode::Char('l') | KeyCode::Right => Message::FocusRight,
         KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
         KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
         KeyCode::Enter => Message::Confirm,
         KeyCode::Esc => Message::Back,
+        KeyCode::Char('d') => Message::RemoveFromQueue,
+        KeyCode::Char('D') => Message::DeleteFromLibrary,
         _ => Message::None,
     }
 }

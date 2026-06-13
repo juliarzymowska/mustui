@@ -1,7 +1,7 @@
 use crate::{
     audio::Audio,
     client::Backend,
-    model::{AudioStatus, LoopMode, Model, SearchFocus, View},
+    model::{AudioStatus, LoopMode, Model, PlayerFocus, SearchFocus, View},
     msg::Message,
     task::Task,
 };
@@ -122,6 +122,41 @@ pub fn update(
             nav_next(model);
             Message::None
         }
+        Message::FocusLeft => {
+            if model.view == View::Player {
+                model.player_focus = PlayerFocus::Library;
+            }
+            Message::None
+        }
+        Message::FocusRight => {
+            if model.view == View::Player {
+                model.player_focus = PlayerFocus::Queue;
+            }
+            Message::None
+        }
+        Message::DeleteFromLibrary => {
+            if let Some(entry) = model.library.get(model.library_selected).cloned() {
+                crate::library::delete_track(&backend.music_dir, &entry.id);
+                model.library = crate::library::load_downloads(&backend.music_dir);
+                if !model.library.is_empty() && model.library_selected >= model.library.len() {
+                    model.library_selected = model.library.len() - 1;
+                }
+            }
+            Message::None
+        }
+
+        Message::RemoveFromQueue => {
+            if !model.queue.is_empty() {
+                let idx = model.queue_selected.min(model.queue.len() - 1);
+                model.queue.remove(idx);
+                if !model.queue.is_empty() {
+                    model.queue_selected = idx.min(model.queue.len() - 1);
+                } else {
+                    model.queue_selected = 0;
+                }
+            }
+            Message::None
+        }
         Message::Confirm => {
             handle_confirm(model, backend, task);
             Message::None
@@ -222,9 +257,14 @@ fn nav_prev(model: &mut Model) {
         View::Search => {
             model.results_selected = model.results_selected.saturating_sub(1);
         }
-        View::Player => {
-            model.library_selected = model.library_selected.saturating_sub(1);
-        }
+        View::Player => match model.player_focus {
+            PlayerFocus::Library => {
+                model.library_selected = model.library_selected.saturating_sub(1);
+            }
+            PlayerFocus::Queue => {
+                model.queue_selected = model.queue_selected.saturating_sub(1);
+            }
+        },
     }
 }
 
@@ -236,12 +276,20 @@ fn nav_next(model: &mut Model) {
                 model.results_selected += 1;
             }
         }
-        View::Player => {
-            let max = model.library.len().saturating_sub(1);
-            if model.library_selected < max {
-                model.library_selected += 1;
+        View::Player => match model.player_focus {
+            PlayerFocus::Library => {
+                let max = model.library.len().saturating_sub(1);
+                if model.library_selected < max {
+                    model.library_selected += 1;
+                }
             }
-        }
+            PlayerFocus::Queue => {
+                let max = model.queue.len().saturating_sub(1);
+                if model.queue_selected < max {
+                    model.queue_selected += 1;
+                }
+            }
+        },
     }
 }
 

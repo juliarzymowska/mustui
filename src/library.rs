@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::models::{PlaylistEntry, Track};
+use crate::models::{PlaylistEntry, Track, TrackId};
 
 /// Scan `music_dir` for `<id>.json` metadata sidecars (written on each download)
 /// and return them as a sorted list of tracks.
@@ -33,6 +33,16 @@ pub fn load_downloads(music_dir: &Path) -> Vec<PlaylistEntry> {
 
     tracks.sort_by(|a, b| a.artist.cmp(&b.artist).then(a.title.cmp(&b.title)));
     tracks
+}
+
+/// Delete all audio files and the JSON sidecar for `id` from `music_dir`.
+pub fn delete_track(music_dir: &Path, id: &TrackId) {
+    for ext in ["m4a", "mp3", "webm", "opus", "json"] {
+        let p = music_dir.join(format!("{}.{ext}", id.0));
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
 }
 
 /// Write a metadata sidecar `<stem>.json` next to the audio file so

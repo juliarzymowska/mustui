@@ -4,6 +4,13 @@ use std::time::Duration;
 use crate::models::{PlaylistEntry, SearchResults, Track, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PlayerFocus {
+    #[default]
+    Library,
+    Queue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum View {
     Search,
     #[default]
@@ -56,9 +63,11 @@ pub struct Model {
     pub results_selected: usize,
 
     // ── Player view ─────────────────────────────
+    pub player_focus: PlayerFocus,
     pub library: Vec<PlaylistEntry>,
     pub library_selected: usize,
     pub queue: Vec<Track>,
+    pub queue_selected: usize,
 
     // ── Shared ──────────────────────────────────
     pub playback: PlaybackState,

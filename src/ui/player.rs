@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    model::{AudioStatus, LoopMode, Model},
+    model::{AudioStatus, LoopMode, Model, PlayerFocus},
     ui::theme,
 };
 
@@ -17,11 +17,9 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &mut Model) {
     ])
     .areas(area);
 
-    let [songs_area, queue_area] = Layout::horizontal([
-        Constraint::Percentage(60),
-        Constraint::Percentage(40),
-    ])
-    .areas(main_area);
+    let [songs_area, queue_area] =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .areas(main_area);
 
     draw_songs(frame, songs_area, model);
     draw_queue(frame, queue_area, model);
@@ -30,10 +28,15 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &mut Model) {
 }
 
 fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
+    let border_style = if model.player_focus == PlayerFocus::Library {
+        theme::accent()
+    } else {
+        Default::default()
+    };
     let block = Block::new()
         .borders(Borders::ALL)
         .title(" Library ")
-        .border_style(theme::accent());
+        .border_style(border_style);
 
     if model.library.is_empty() {
         let inner = block.inner(area);
@@ -42,7 +45,11 @@ fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
             Paragraph::new("no downloads yet — search and play a track")
                 .style(theme::dimmed())
                 .alignment(Alignment::Center),
-            Rect { y: inner.y + inner.height / 2, height: 1, ..inner },
+            Rect {
+                y: inner.y + inner.height / 2,
+                height: 1,
+                ..inner
+            },
         );
         return;
     }
@@ -62,7 +69,9 @@ fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
         })
         .collect();
 
-    let sel = model.library_selected.min(model.library.len().saturating_sub(1));
+    let sel = model
+        .library_selected
+        .min(model.library.len().saturating_sub(1));
 
     let list = List::new(items)
         .block(block)
@@ -74,7 +83,16 @@ fn draw_songs(frame: &mut Frame, area: Rect, model: &Model) {
 }
 
 fn draw_queue(frame: &mut Frame, area: Rect, model: &Model) {
-    let block = Block::new().borders(Borders::ALL).title(" Queue ");
+    let focused = model.player_focus == PlayerFocus::Queue;
+    let border_style = if focused {
+        theme::accent()
+    } else {
+        Default::default()
+    };
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .title(" Queue ")
+        .border_style(border_style);
 
     if model.queue.is_empty() {
         let inner = block.inner(area);
@@ -83,7 +101,11 @@ fn draw_queue(frame: &mut Frame, area: Rect, model: &Model) {
             Paragraph::new("queue is empty")
                 .style(theme::dimmed())
                 .alignment(Alignment::Center),
-            Rect { y: inner.y + inner.height / 2, height: 1, ..inner },
+            Rect {
+                y: inner.y + inner.height / 2,
+                height: 1,
+                ..inner
+            },
         );
         return;
     }
@@ -95,15 +117,23 @@ fn draw_queue(frame: &mut Frame, area: Rect, model: &Model) {
         .map(|t| {
             let label = format!("{} — {}", t.artist, t.title);
             if Some(&t.id) == playing_id {
-                ListItem::new(format!("▶ {}", label)).style(theme::bold())
+                ListItem::new(format!("> {}", label)).style(theme::bold())
             } else {
                 ListItem::new(format!("  {}", label))
             }
         })
         .collect();
 
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
+    let sel = model
+        .queue_selected
+        .min(model.queue.len().saturating_sub(1));
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(theme::reversed())
+        .highlight_symbol("> ");
+
+    let mut state = ListState::default().with_selected(if focused { Some(sel) } else { None });
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_now_playing(frame: &mut Frame, area: Rect, model: &Model) {
@@ -161,21 +191,21 @@ fn draw_now_playing(frame: &mut Frame, area: Rect, model: &Model) {
             );
 
             let status = match model.playback.status {
-                AudioStatus::Playing => "▶  Playing",
-                AudioStatus::Paused => "⏸  Paused",
-                AudioStatus::Loading => "⏳ Loading",
+                AudioStatus::Playing => "Playing",
+                AudioStatus::Paused => "Paused",
+                AudioStatus::Loading => "Loading",
                 AudioStatus::Idle => "   Idle",
             };
             let loop_str = match model.playback.loop_mode {
-                LoopMode::One => "  [↺ one]",
-                LoopMode::Playlist => "  [⟳ all]",
+                LoopMode::One => "  [one]",
+                LoopMode::Playlist => "  [all]",
                 LoopMode::Off => "",
             };
             let err = model
                 .playback
                 .error
                 .as_deref()
-                .map(|e| format!("  ⚠ {e}"))
+                .map(|e| format!(" {e}"))
                 .unwrap_or_default();
             frame.render_widget(
                 Paragraph::new(format!("{status}{loop_str}{err}")).style(theme::dimmed()),
@@ -185,8 +215,14 @@ fn draw_now_playing(frame: &mut Frame, area: Rect, model: &Model) {
     }
 }
 
-fn draw_shortcuts(frame: &mut Frame, area: Rect, _model: &Model) {
-    let text =
-        " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [↵] play  [Tab] search  [q] quit";
+fn draw_shortcuts(frame: &mut Frame, area: Rect, model: &Model) {
+    let text = match model.player_focus {
+        PlayerFocus::Library => {
+            " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [↵] play  [D] delete  [l] queue  [Tab] search  [q] quit"
+        }
+        PlayerFocus::Queue => {
+            " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [d] remove  [h] library  [Tab] search  [q] quit"
+        }
+    };
     frame.render_widget(Paragraph::new(text).style(theme::dimmed()), area);
 }
