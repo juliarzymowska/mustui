@@ -1,8 +1,8 @@
 use crate::{
     audio::Audio,
-    client::Backend,
-    model::{AudioStatus, LoopMode, Model, PlayerFocus, SearchFocus, View},
+    data::client::Backend,
     msg::Message,
+    state::{AudioStatus, FetchStatus, LoopMode, Model, PlayerFocus, SearchFocus, View},
     task::Task,
 };
 
@@ -19,8 +19,16 @@ pub fn update(
         // ── Tick: advance playback state ────────────────────────────────────
         Message::Tick => {
             let ended = audio.tick();
-            model.playback.status = audio.status;
             model.playback.position = audio.position;
+
+            // While a download is in flight: show Loading and don't auto-advance,
+            // otherwise PlayNext would skip over the track that's still fetching.
+            if model.playback.pending_id.is_some() {
+                model.playback.status = AudioStatus::Loading;
+                return Message::None;
+            }
+
+            model.playback.status = audio.status;
             if ended {
                 match model.playback.loop_mode {
                     LoopMode::One => {
@@ -136,8 +144,8 @@ pub fn update(
         }
         Message::DeleteFromLibrary => {
             if let Some(entry) = model.library.get(model.library_selected).cloned() {
-                crate::library::delete_track(&backend.music_dir, &entry.id);
-                model.library = crate::library::load_downloads(&backend.music_dir);
+                crate::data::library::delete_track(&backend.music_dir, &entry.id);
+                model.library = crate::data::library::load_downloads(&backend.music_dir);
                 if !model.library.is_empty() && model.library_selected >= model.library.len() {
                     model.library_selected = model.library.len() - 1;
                 }
@@ -148,19 +156,62 @@ pub fn update(
         Message::RemoveFromQueue => {
             if !model.queue.is_empty() {
                 let idx = model.queue_selected.min(model.queue.len() - 1);
-                model.queue.remove(idx);
-                if !model.queue.is_empty() {
-                    model.queue_selected = idx.min(model.queue.len() - 1);
-                } else {
-                    model.queue_selected = 0;
+                let is_current = model.playback.current.as_ref()
+                    .is_some_and(|c| c.id == model.queue[idx].id);
+                if !is_current {
+                    model.queue.remove(idx);
+                    if !model.queue.is_empty() {
+                        model.queue_selected = idx.min(model.queue.len() - 1);
+                    } else {
+                        model.queue_selected = 0;
+                    }
                 }
             }
             Message::None
         }
-        Message::Confirm => {
-            handle_confirm(model, backend, task);
+        Message::FetchTrack => {
+            let Some(track) = model.results.tracks.get(model.results_selected).cloned() else {
+                return Message::None;
+            };
+            if model.fetching_id.is_some() {
+                return Message::None;
+            }
+            model.fetching_id = Some(track.id.clone());
+            model.fetch_status = Some(FetchStatus::Fetching);
+            let music_dir = backend.music_dir.clone();
+            let track_id = track.id.clone();
+            task.spawn(move || {
+                let result = crate::data::ytdlp::ensure_local_audio(&music_dir, &track_id);
+                match result {
+                    Ok(path) => Message::FetchReady(track_id, path),
+                    Err(e) => Message::FetchFailed(track_id, e.to_string()),
+                }
+            });
             Message::None
         }
+
+        Message::FetchReady(ref id, ref path) => {
+            if model.fetching_id.as_ref() == Some(id) {
+                model.fetching_id = None;
+                model.fetch_status = Some(FetchStatus::Done);
+                if let Some(track) = model.results.tracks.iter().find(|t| &t.id == id).cloned() {
+                    crate::data::library::save_sidecar(path, &track);
+                }
+                model.library = crate::data::library::load_downloads(&backend.music_dir);
+            }
+            Message::None
+        }
+
+        Message::FetchFailed(ref id, ref err) => {
+            if model.fetching_id.as_ref() == Some(id) {
+                model.fetching_id = None;
+                model.fetch_status = Some(FetchStatus::Failed(err.clone()));
+                crate::data::library::delete_track(&backend.music_dir, id);
+            }
+            Message::None
+        }
+
+        Message::Confirm => handle_confirm(model, backend, task),
         Message::Back => {
             handle_back(model);
             Message::None
@@ -183,8 +234,8 @@ pub fn update(
             model.search_focus = SearchFocus::Results;
             if !model.query.is_empty() {
                 let query = model.query.clone();
-                task.spawn(async move {
-                    let result = crate::ytdlp::search(&query, 10);
+                task.spawn(move || {
+                    let result = crate::data::ytdlp::search(&query, 10);
                     Message::SearchDone(result.map_err(|e| e.to_string()))
                 });
             }
@@ -203,25 +254,16 @@ pub fn update(
             Message::None
         }
 
-        Message::AddToQueue => {
-            if let Some(track) = model.results.tracks.get(model.results_selected).cloned() {
-                if !model.queue.iter().any(|t| t.id == track.id) {
-                    model.queue.push(track);
-                }
-            }
-            Message::None
-        }
-
         Message::DownloadReady(ref id, ref path) => {
             if model.playback.pending_id.as_ref() == Some(id) {
                 model.playback.pending_id = None;
                 model.playback.current_path = Some(path.clone());
 
                 if let Some(ref track) = model.playback.current {
-                    crate::library::save_sidecar(path, track);
+                    crate::data::library::save_sidecar(path, track);
                 }
 
-                model.library = crate::library::load_downloads(&backend.music_dir);
+                model.library = crate::data::library::load_downloads(&backend.music_dir);
                 if !model.library.is_empty() && model.library_selected >= model.library.len() {
                     model.library_selected = model.library.len() - 1;
                 }
@@ -232,8 +274,14 @@ pub fn update(
                         model.playback.error = None;
                     }
                     Err(e) => {
+                        // File exists but can't be decoded — likely a partial/corrupt
+                        // download. Remove it so the next play attempt re-downloads.
+                        std::fs::remove_file(path).ok();
+                        crate::data::library::delete_track(&backend.music_dir, id);
+                        model.library = crate::data::library::load_downloads(&backend.music_dir);
+                        model.playback.current_path = None;
                         model.playback.status = AudioStatus::Idle;
-                        model.playback.error = Some(e.to_string());
+                        model.playback.error = Some(format!("{e} — try playing again"));
                     }
                 }
             }
@@ -293,18 +341,14 @@ fn nav_next(model: &mut Model) {
     }
 }
 
-fn handle_confirm(model: &mut Model, backend: &Backend, task: &Task<Message>) {
+fn handle_confirm(model: &mut Model, backend: &Backend, task: &Task<Message>) -> Message {
     match model.view {
-        View::Search => {
-            if let Some(track) = model.results.tracks.get(model.results_selected).cloned() {
-                start_playing(model, track, backend, task);
-            }
-        }
+        View::Search => Message::FetchTrack,
         View::Player => {
             let Some(entry) = model.library.get(model.library_selected).cloned() else {
-                return;
+                return Message::None;
             };
-            let track = crate::models::Track {
+            let track = crate::domain::Track {
                 id: entry.id,
                 title: entry.title,
                 artist: entry.artist,
@@ -318,6 +362,7 @@ fn handle_confirm(model: &mut Model, backend: &Backend, task: &Task<Message>) {
             if model.playback.status == AudioStatus::Idle {
                 start_playing(model, track, backend, task);
             }
+            Message::None
         }
     }
 }
@@ -333,19 +378,20 @@ fn handle_back(model: &mut Model) {
 
 fn start_playing(
     model: &mut Model,
-    track: crate::models::Track,
+    track: crate::domain::Track,
     backend: &Backend,
     task: &Task<Message>,
 ) {
     model.playback.status = AudioStatus::Loading;
     model.playback.current = Some(track.clone());
     model.playback.pending_id = Some(track.id.clone());
+    model.playback.current_path = None;
     model.playback.error = None;
 
     let music_dir = backend.music_dir.clone();
     let track_id = track.id.clone();
-    task.spawn(async move {
-        let result = crate::ytdlp::ensure_local_audio(&music_dir, &track_id);
+    task.spawn(move || {
+        let result = crate::data::ytdlp::ensure_local_audio(&music_dir, &track_id);
         match result {
             Ok(path) => Message::DownloadReady(track_id, path),
             Err(e) => Message::DownloadFailed(track_id, e.to_string()),

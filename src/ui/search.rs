@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::{
-    model::{Model, SearchFocus},
+    state::{FetchStatus, Model, SearchFocus},
     ui::theme,
 };
 
@@ -30,21 +30,22 @@ pub fn draw(frame: &mut Frame, area: Rect, model: &Model) {
 }
 
 fn draw_shortcuts(frame: &mut Frame, area: Rect, model: &Model) {
-    use crate::model::SearchFocus;
     let text = match model.search_focus {
-        SearchFocus::Input => {
-            " [Enter] search  [Esc] go to results  [Tab] player  [Ctrl-C] quit"
-        }
+        SearchFocus::Input => " [Enter] search  [Esc] go to results  [Tab] player  [Ctrl-C] quit",
         SearchFocus::Results => {
-            " [/][Esc] edit search  [j/k] nav  [↵] play now  [a] add to queue  [Tab] player  [q] quit"
+            " [/][Esc] edit search  [j/k] nav  [Enter] download  [Tab] player  [q] quit"
         }
     };
-    frame.render_widget(Paragraph::new(text).style(theme::dimmed()), area);
+    frame.render_widget(Paragraph::new(text).style(theme::reversed()), area);
 }
 
 fn draw_search_bar(frame: &mut Frame, area: Rect, model: &Model) {
     let focused = model.search_focus == SearchFocus::Input;
-    let border_style = if focused { theme::accent() } else { Style::default() };
+    let border_style = if focused {
+        theme::accent()
+    } else {
+        Style::default()
+    };
     let block = Block::new()
         .borders(Borders::ALL)
         .title(" Search YouTube ")
@@ -77,7 +78,11 @@ fn draw_search_bar(frame: &mut Frame, area: Rect, model: &Model) {
 
 fn draw_results(frame: &mut Frame, area: Rect, model: &Model) {
     let focused = model.search_focus == SearchFocus::Results;
-    let border_style = if focused { theme::accent() } else { Style::default() };
+    let border_style = if focused {
+        theme::accent()
+    } else {
+        Style::default()
+    };
 
     if model.results.tracks.is_empty() {
         let block = Block::new()
@@ -90,7 +95,11 @@ fn draw_results(frame: &mut Frame, area: Rect, model: &Model) {
             Paragraph::new("no results yet")
                 .style(theme::dimmed())
                 .alignment(Alignment::Center),
-            Rect { y: inner.y + inner.height / 2, height: 1, ..inner },
+            Rect {
+                y: inner.y + inner.height / 2,
+                height: 1,
+                ..inner
+            },
         );
         return;
     }
@@ -120,7 +129,12 @@ fn draw_results(frame: &mut Frame, area: Rect, model: &Model) {
     };
 
     let list = List::new(items)
-        .block(Block::new().borders(Borders::ALL).title(title).border_style(border_style))
+        .block(
+            Block::new()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(border_style),
+        )
         .highlight_style(theme::reversed())
         .highlight_symbol("> ");
 
@@ -141,17 +155,21 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         return;
     };
 
-    let already_queued = model.queue.iter().any(|q| q.id == track.id);
+    let is_fetching_this = model.fetching_id.as_ref() == Some(&track.id);
 
     let dur_str = track
         .duration
         .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
         .unwrap_or_else(|| "—".to_owned());
 
-    let status_line = if let Some(ref err) = model.playback.error {
-        format!("⚠ {err}")
+    let status_line = if is_fetching_this {
+        "Downloading...".to_owned()
     } else {
-        String::new()
+        match &model.fetch_status {
+            Some(FetchStatus::Done) => "Downloaded — play it from the library".to_owned(),
+            Some(FetchStatus::Failed(e)) => format!("Failed: {e} — try again"),
+            Some(FetchStatus::Fetching) | None => String::new(),
+        }
     };
 
     let lines = [
@@ -160,16 +178,14 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         format!("Album:    {}", track.album.as_deref().unwrap_or("—")),
         format!("Duration: {}", dur_str),
         String::new(),
-        if already_queued {
-            "[↵] play now  ✓ already in queue".to_owned()
-        } else {
-            "[↵] play now  [a] add to queue".to_owned()
-        },
+        "[↵] download".to_owned(),
         status_line,
     ];
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n")).wrap(Wrap { trim: false }).style(theme::normal()),
+        Paragraph::new(lines.join("\n"))
+            .wrap(Wrap { trim: false })
+            .style(theme::normal()),
         inner,
     );
 }

@@ -5,9 +5,9 @@ use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::{
     audio::Audio,
-    client::Backend,
-    model::{Model, SearchFocus, View},
+    data::client::Backend,
     msg::Message,
+    state::{Model, SearchFocus, View},
     task::Task,
     ui,
     update::update,
@@ -34,7 +34,7 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<()> {
-        self.model.library = crate::library::load_downloads(&self.backend.music_dir);
+        self.model.library = crate::data::library::load_downloads(&self.backend.music_dir);
 
         let tick_rate = Duration::from_millis(40);
         let mut last_tick = Instant::now();
@@ -43,13 +43,12 @@ impl App {
             terminal.draw(|f| ui::draw(f, &mut self.model))?;
 
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-            if event::poll(timeout)? {
-                if let event::Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        let msg = translate_key(key, &self.model);
-                        self.dispatch(msg);
-                    }
-                }
+            if event::poll(timeout)?
+                && let event::Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                let msg = translate_key(key, &self.model);
+                self.dispatch(msg);
             }
 
             if last_tick.elapsed() >= tick_rate {
@@ -99,7 +98,6 @@ fn translate_search(key: event::KeyEvent, focus: &SearchFocus) -> Message {
             KeyCode::Char('j') | KeyCode::Down => Message::NavDown,
             KeyCode::Char('k') | KeyCode::Up => Message::NavUp,
             KeyCode::Enter => Message::Confirm,
-            KeyCode::Char('a') => Message::AddToQueue,
             KeyCode::Char('H') => Message::SkipPrev,
             KeyCode::Char('L') => Message::SkipNext,
             KeyCode::Tab => Message::ToggleView,

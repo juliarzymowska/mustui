@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::models::{PlaylistEntry, SearchResults, Track, TrackId};
+use crate::domain::{PlaylistEntry, SearchResults, Track, TrackId};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchStatus {
+    Fetching,
+    Done,
+    Failed(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PlayerFocus {
@@ -61,6 +68,8 @@ pub struct Model {
     pub query: String,
     pub results: SearchResults,
     pub results_selected: usize,
+    pub fetching_id: Option<TrackId>,
+    pub fetch_status: Option<FetchStatus>,
 
     // ── Player view ─────────────────────────────
     pub player_focus: PlayerFocus,

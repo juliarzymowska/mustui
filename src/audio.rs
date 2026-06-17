@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 
-use crate::model::AudioStatus;
+use crate::state::AudioStatus;
 
 pub struct Audio {
     sink: MixerDeviceSink,

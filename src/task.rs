@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::sync::mpsc::Sender;
 
 #[derive(Debug)]
@@ -11,11 +10,10 @@ impl<T: Send + 'static> Task<T> {
         Self { sender }
     }
 
-    pub fn spawn(&self, future: impl Future<Output = T> + Send + 'static) {
+    pub fn spawn(&self, f: impl FnOnce() -> T + Send + 'static) {
         let sender = self.sender.clone();
         std::thread::spawn(move || {
-            let msg = smol::block_on(async_compat::Compat::new(future));
-            let _ = sender.send(msg);
+            let _ = sender.send(f());
         });
     }
 }

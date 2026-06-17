@@ -6,8 +6,8 @@ use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::{
+    domain::{SearchResults, ThumbnailUrl, Track, TrackId},
     error::{CoreError, Result},
-    models::{SearchResults, ThumbnailUrl, Track, TrackId},
 };
 
 pub(crate) fn search(query: &str, limit: u32) -> Result<SearchResults> {

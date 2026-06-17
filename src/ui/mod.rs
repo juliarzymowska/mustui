@@ -4,7 +4,7 @@ pub mod theme;
 
 use ratatui::Frame;
 
-use crate::model::{Model, View};
+use crate::state::{Model, View};
 
 pub fn draw(frame: &mut Frame, model: &mut Model) {
     match model.view {

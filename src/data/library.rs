@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::models::{PlaylistEntry, Track, TrackId};
+use crate::domain::{PlaylistEntry, Track, TrackId};
 
 /// Scan `music_dir` for `<id>.json` metadata sidecars (written on each download)
 /// and return them as a sorted list of tracks.

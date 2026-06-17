@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    model::{AudioStatus, LoopMode, Model, PlayerFocus},
+    state::{AudioStatus, LoopMode, Model, PlayerFocus},
     ui::theme,
 };
 
@@ -218,11 +218,11 @@ fn draw_now_playing(frame: &mut Frame, area: Rect, model: &Model) {
 fn draw_shortcuts(frame: &mut Frame, area: Rect, model: &Model) {
     let text = match model.player_focus {
         PlayerFocus::Library => {
-            " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [↵] play  [D] delete  [l] queue  [Tab] search  [q] quit"
+            " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [Enter] play  [D] delete  [l] queue  [Tab] search  [q] quit"
         }
         PlayerFocus::Queue => {
             " [Space] pause  [r] loop  [H/L] skip  [j/k] nav  [d] remove  [h] library  [Tab] search  [q] quit"
         }
     };
-    frame.render_widget(Paragraph::new(text).style(theme::dimmed()), area);
+    frame.render_widget(Paragraph::new(text).style(theme::reversed()), area);
 }

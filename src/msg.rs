@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::models::{SearchResults, TrackId};
+use crate::domain::{SearchResults, TrackId};
 
 #[derive(Debug)]
 pub enum Message {
@@ -39,7 +39,11 @@ pub enum Message {
     SkipPrev,
 
     // ── Queue management ─────────────────────────
-    AddToQueue,
     RemoveFromQueue,
     DeleteFromLibrary,
+
+    // ── Background fetch (download-only, no playback) ─────────────────
+    FetchTrack,
+    FetchReady(TrackId, PathBuf),
+    FetchFailed(TrackId, String),
 }
