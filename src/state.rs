@@ -63,7 +63,7 @@ pub struct PlaybackState {
 pub struct Model {
     pub view: View,
 
-    // ── Search view ─────────────────────────────
+    // Search view
     pub search_focus: SearchFocus,
     pub query: String,
     pub results: SearchResults,
@@ -71,14 +71,14 @@ pub struct Model {
     pub fetching_id: Option<TrackId>,
     pub fetch_status: Option<FetchStatus>,
 
-    // ── Player view ─────────────────────────────
+    // Player view
     pub player_focus: PlayerFocus,
     pub library: Vec<PlaylistEntry>,
     pub library_selected: usize,
     pub queue: Vec<Track>,
     pub queue_selected: usize,
 
-    // ── Shared ──────────────────────────────────
+    // Shared
     pub playback: PlaybackState,
     pub should_quit: bool,
 }

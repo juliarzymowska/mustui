@@ -9,13 +9,19 @@ A terminal music player that searches YouTube via yt-dlp, downloads audio locall
 
 No ffmpeg or ffprobe required. yt-dlp is told to grab the native audio stream. 
 
+The binary will be at `target/release/mustui`.
+
+## Preview
+![Player view](images/main.png)
+![Search view](images/search.png)
+
+Mustui inherits your terminal feel-and-look.
+
 ## Building
 
 ```
 cargo build --release
 ```
-
-The binary will be at `target/release/mustui`.
 
 ## Running
 
@@ -23,7 +29,7 @@ The binary will be at `target/release/mustui`.
 cargo run --release
 ```
 
-Downloaded audio files and JSON metadata sidecars are stored in your system music directory under a `mustui/` subdirectory (e.g. `~/Music/mustui/` on Linux). Logs are written to `mustui.log` in your local state directory.
+Downloaded audio files and JSON metadata sidecars are stored under your audio directory in a `mustui/` subdirectory, with a fallback to `~/Music/mustui/` on Linux if no audio directory is available. Logs are written to `mustui.log` in your local state directory.
 
 ## How it works
 

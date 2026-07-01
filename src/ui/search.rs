@@ -178,7 +178,7 @@ fn draw_metadata(frame: &mut Frame, area: Rect, model: &Model) {
         format!("Album:    {}", track.album.as_deref().unwrap_or("—")),
         format!("Duration: {}", dur_str),
         String::new(),
-        "[↵] download".to_owned(),
+        "[Enter] download".to_owned(),
         status_line,
     ];
 

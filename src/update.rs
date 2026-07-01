@@ -16,13 +16,11 @@ pub fn update(
     match msg {
         Message::None => Message::None,
 
-        // ── Tick: advance playback state ────────────────────────────────────
+        // Tick: advance playback state
         Message::Tick => {
             let ended = audio.tick();
             model.playback.position = audio.position;
 
-            // While a download is in flight: show Loading and don't auto-advance,
-            // otherwise PlayNext would skip over the track that's still fetching.
             if model.playback.pending_id.is_some() {
                 model.playback.status = AudioStatus::Loading;
                 return Message::None;
@@ -45,7 +43,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Auto-advance queue ──────────────────────────────────────────────
+        // Auto-advance queue
         Message::PlayNext => {
             let next_idx = model
                 .queue
@@ -65,7 +63,7 @@ pub fn update(
             Message::None
         }
 
-        // ── User-triggered queue skip (always wraps) ───────────────────────
+        // User-triggered queue skip (always wraps)
         Message::SkipNext => {
             if model.queue.is_empty() {
                 return Message::None;
@@ -95,7 +93,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Global ──────────────────────────────────────────────────────────
+        // Global
         Message::Quit => {
             model.should_quit = true;
             Message::None
@@ -121,7 +119,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Navigation routed by view ────────────────────────────────────
+        // Navigation routed by view
         Message::NavUp => {
             nav_prev(model);
             Message::None
@@ -156,7 +154,10 @@ pub fn update(
         Message::RemoveFromQueue => {
             if !model.queue.is_empty() {
                 let idx = model.queue_selected.min(model.queue.len() - 1);
-                let is_current = model.playback.current.as_ref()
+                let is_current = model
+                    .playback
+                    .current
+                    .as_ref()
                     .is_some_and(|c| c.id == model.queue[idx].id);
                 if !is_current {
                     model.queue.remove(idx);
@@ -217,7 +218,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Search view ──────────────────────────────────────────────────
+        // Search view
         Message::EnterSearch => {
             model.search_focus = SearchFocus::Input;
             Message::None
@@ -242,7 +243,7 @@ pub fn update(
             Message::None
         }
 
-        // ── Async results ─────────────────────────────────────────────────
+        // Async results
         Message::SearchDone(Ok(results)) => {
             model.results = results;
             model.results_selected = 0;
@@ -298,7 +299,7 @@ pub fn update(
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// Helpers
 
 fn nav_prev(model: &mut Model) {
     match model.view {

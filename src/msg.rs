@@ -4,7 +4,7 @@ use crate::domain::{SearchResults, TrackId};
 
 #[derive(Debug)]
 pub enum Message {
-    // ── Global ──────────────────────────────────
+    // Global
     Quit,
     Tick,
     None,
@@ -12,7 +12,7 @@ pub enum Message {
     TogglePause,
     ToggleLoop,
 
-    // ── Navigation (context-routed in update) ───
+    // Navigation (context-routed in update)
     NavUp,
     NavDown,
     FocusLeft,
@@ -20,29 +20,29 @@ pub enum Message {
     Confirm,
     Back,
 
-    // ── Search view ─────────────────────────────
+    // Search view
     EnterSearch,
     SearchChar(char),
     SearchBackspace,
     SubmitSearch,
 
-    // ── Async results ────────────────────────────
+    // Async results
     SearchDone(Result<SearchResults, String>),
     DownloadReady(TrackId, PathBuf),
     DownloadFailed(TrackId, String),
 
-    // ── Internal auto-advance ────────────────────
+    // Internal auto-advance
     PlayNext,
 
-    // ── User-triggered queue skip (always wraps) ─
+    // User-triggered queue skip (always wraps)
     SkipNext,
     SkipPrev,
 
-    // ── Queue management ─────────────────────────
+    // Queue management
     RemoveFromQueue,
     DeleteFromLibrary,
 
-    // ── Background fetch (download-only, no playback) ─────────────────
+    // Background fetch (download-only, no playback)
     FetchTrack,
     FetchReady(TrackId, PathBuf),
     FetchFailed(TrackId, String),
